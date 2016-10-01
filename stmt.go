@@ -26,10 +26,10 @@ type stmt struct {
 
 func (s *stmt) Close() error {
 	if s.rows {
-		panic("database/sql/driver: misuse of db2 cli driver: stmt Close with active Rows")
+		panic("database/sql/driver: [asifjalil][CLI Driver]: stmt Close with active Rows")
 	}
 	if s.closed {
-		panic("database/sql/driver: misuse of db2 cli driver: double Close of Stmt")
+		panic("database/sql/driver: [asifjalil][CLI Driver]: double Close of Stmt")
 	}
 	s.closed = true
 	ret := C.SQLFreeHandle(C.SQL_HANDLE_STMT, s.hstmt)
@@ -43,7 +43,7 @@ func (s *stmt) Close() error {
 func (s *stmt) NumInput() int {
 	var paramCount C.SQLSMALLINT
 	if s.closed {
-		panic("database/sql/driver: misuse of db2 cli driver: NumInput after Close")
+		panic("database/sql/driver:[asifjalil][CLI Driver]: NumInput after Close")
 	}
 	ret := C.SQLNumParams(C.SQLHSTMT(s.hstmt), &paramCount)
 	if !success(ret) {
@@ -54,10 +54,10 @@ func (s *stmt) NumInput() int {
 
 func (s *stmt) Exec(args []driver.Value) (driver.Result, error) {
 	if s.closed {
-		panic("database/sql/driver: misuse of db2 cli driver: Exec after Close")
+		panic("database/sql/driver: [asifjalil][CLI Driver]: Exec after Close")
 	}
 	if s.rows {
-		panic("database/sql/driver: misuse of db2 cli driver: Exec with active Rows")
+		panic("database/sql/driver: [asifjalil][CLI Driver]: Exec with active Rows")
 	}
 
 	err := s.exec(args)
@@ -74,10 +74,10 @@ func (s *stmt) Exec(args []driver.Value) (driver.Result, error) {
 
 func (s *stmt) Query(args []driver.Value) (driver.Rows, error) {
 	if s.closed {
-		panic("database/sql/driver: misuse of db2 cli driver: Query after stmt Close")
+		panic("database/sql/driver: [asifjalil][CLI Driver]: Query after stmt Close")
 	}
 	if s.rows {
-		panic("database/sql/driver: misuse of db2 cli driver: Query with active Rows")
+		panic("database/sql/driver: [asifjalil][CLI Driver]: Query with active Rows")
 	}
 
 	err := s.exec(args)
@@ -268,7 +268,7 @@ func (r *rows) Close() error {
 
 func (r *rows) Next(dest []driver.Value) error {
 	if r.s == nil {
-		panic("database/sql/driver: misuse of db2 cli driver: Next on closed Rows")
+		panic("database/sql/driver: [asifjalil][CLI Driver]: Next on closed Rows")
 	}
 	ret := C.SQLFetch(C.SQLHSTMT(r.s.hstmt))
 	if ret == C.SQL_NO_DATA {

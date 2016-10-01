@@ -107,17 +107,26 @@ func (c *column) value() (driver.Value, error) {
 			int(t.fraction),
 			time.Local)
 		return r, nil
-	case C.SQL_C_DATE:
+	case C.SQL_C_TYPE_DATE:
 		t := (*sql_DATE_STRUCT)(p)
 		r := time.Date(int(t.year),
 			time.Month(t.month),
 			int(t.day),
 			0, 0, 0, 0, time.Local)
 		return r, nil
+	case C.SQL_C_TYPE_TIME:
+		t := (*sql_TIME_STRUCT)(p)
+		r := time.Date(0, 0, 0,
+			int(t.hour),
+			int(t.minute),
+			int(t.second),
+			0,
+			time.Local)
+		return r, nil
 	case C.SQL_C_BINARY:
 		return buf, nil
 	}
-	return nil, fmt.Errorf("database/sql/driver: [asifjalil][go CLI Driver]: unsupported column ctype %d", c.ctype)
+	return nil, fmt.Errorf("database/sql/driver: [asifjalil][CLI Driver]: unsupported column ctype %d", c.ctype)
 }
 
 func describeColumn(h C.SQLHSTMT, idx int, namebuf []uint16) (namelen int,
@@ -168,7 +177,11 @@ func newColumn(h C.SQLHSTMT, idx int) (*column, error) {
 		col.data = make([]byte, int(unsafe.Sizeof(v)))
 	case C.SQL_TYPE_DATE:
 		var v sql_DATE_STRUCT
-		col.ctype = C.SQL_C_DATE
+		col.ctype = C.SQL_C_TYPE_DATE
+		col.data = make([]byte, int(unsafe.Sizeof(v)))
+	case C.SQL_TYPE_TIME:
+		var v sql_TIME_STRUCT
+		col.ctype = C.SQL_C_TYPE_TIME
 		col.data = make([]byte, int(unsafe.Sizeof(v)))
 	case C.SQL_CHAR, C.SQL_VARCHAR:
 		l := int(size)
@@ -190,7 +203,7 @@ func newColumn(h C.SQLHSTMT, idx int) (*column, error) {
 		// Check out "Data type length (CLI) table" in DB2 Information Center
 		// http://www.ibm.com/support/knowledgecenter/SSEPGG_10.5.0/com.ibm.db2.luw.apdv.cli.doc/doc/r0006844.html
 	default:
-		return nil, fmt.Errorf("database/sql/driver: [asifjalil][go CLI Driver]: unsupported database column type %d", sqltype)
+		return nil, fmt.Errorf("database/sql/driver: [asifjalil][CLI Driver]: unsupported database column type %d", sqltype)
 	}
 	// only use SQLBindCol if we were able to allocate a byte buffer for the column
 	if len(col.data) > 0 {

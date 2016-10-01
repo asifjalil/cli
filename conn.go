@@ -44,7 +44,7 @@ func (d *impl) Open(dsn string) (driver.Conn, error) {
 
 func (c *conn) Close() error {
 	if c.closed {
-		panic("database/sql/driver: misuse of db2 cli driver: multiple connection Close")
+		panic("database/sql/driver: [asifjalil][CLI Driver]: multiple connection Close")
 	}
 
 	c.closed = true
@@ -69,7 +69,7 @@ func (c *conn) Prepare(sql string) (driver.Stmt, error) {
 	wsql := stringToUTF16Ptr(sql)
 
 	if c.closed {
-		panic("database/sql/driver: misuse of db2 cli driver: Prepare after conn Close")
+		panic("database/sql/driver: [asifjalil][CLI Driver]: Prepare after conn Close")
 	}
 
 	// allocate statement handle
@@ -96,7 +96,7 @@ func (c *conn) Prepare(sql string) (driver.Stmt, error) {
 
 func (c *conn) Begin() (driver.Tx, error) {
 	if c.tx {
-		panic("database/sql/driver: misuse of db2 cli driver: multiple Tx")
+		panic("database/sql/driver: [asifjalil][CLI driver]: multiple Tx")
 	}
 	// turn off autocommit
 	err := c.setAutoCommitAttr(C.SQL_AUTOCOMMIT_OFF)

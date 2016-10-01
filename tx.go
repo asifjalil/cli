@@ -6,7 +6,7 @@ type tx struct {
 
 func (t *tx) Commit() error {
 	if t.c == nil {
-		panic("database/sql/driver: misuse of db2 cli driver: extra Commit")
+		panic("database/sql/driver: [asifjalil][CLI Driver]: extra Commit")
 	}
 	err := t.c.endTx(true)
 	t.c = nil
@@ -16,7 +16,7 @@ func (t *tx) Commit() error {
 
 func (t *tx) Rollback() error {
 	if t.c == nil {
-		panic("database/sql/driver: misuse of db2 cli driver: extra Rollback")
+		panic("database/sql/driver: [asifjalil][CLI Driver]: extra Rollback")
 	}
 	err := t.c.endTx(false)
 	t.c = nil

@@ -30,6 +30,12 @@ type (
 		second   C.SQLUSMALLINT
 		fraction C.SQLUINTEGER
 	}
+
+	sql_TIME_STRUCT struct {
+		hour   C.SQLUSMALLINT
+		minute C.SQLUSMALLINT
+		second C.SQLUSMALLINT
+	}
 )
 
 type impl struct {
@@ -40,7 +46,7 @@ func initDriver() error {
 	// Allocate environment handle
 	ret := C.SQLAllocHandle(C.SQL_HANDLE_ENV, C.SQL_NULL_HANDLE, &drv.henv)
 	if !success(ret) {
-		return fmt.Errorf("Failed to allocate CLI environment handle; rc: %d ", int(ret))
+		return fmt.Errorf("database/sql/driver: [asifjalil][CLI driver]Failed to allocate environment handle; rc: %d ", int(ret))
 	}
 
 	//use ODBC v3

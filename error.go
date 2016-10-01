@@ -25,7 +25,7 @@ type CliError struct {
 }
 
 func (e *CliError) Error() string {
-	return fmt.Sprintf("[ SQLCODE: %d|SQLSTATE: %s ] - %s", e.SqlCode, e.SqlState, e.Message)
+	return fmt.Sprintf("database/sql/driver: [asifjalil][CLI driver]:[ SQLCODE: %d|SQLSTATE: %s ] - %s", e.SqlCode, e.SqlState, e.Message)
 }
 
 func success(ret C.SQLRETURN) bool {
