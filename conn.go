@@ -120,7 +120,7 @@ func (c *conn) setAutoCommitAttr(a uintptr) error {
 // Commits or rollsback a transaction and turns on auto-commit for the connection
 func (c *conn) endTx(commit bool) error {
 	if !c.tx {
-		return errors.New("database/sql/driver: misuse of db2 cli driver: commit/rollback when not in a transaction")
+		return errors.New("database/sql/driver: [asifjalil][CLI Driver]: commit/rollback when not in a transaction")
 	}
 	c.tx = false
 

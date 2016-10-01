@@ -183,7 +183,7 @@ func newColumn(h C.SQLHSTMT, idx int) (*column, error) {
 		var v sql_TIME_STRUCT
 		col.ctype = C.SQL_C_TYPE_TIME
 		col.data = make([]byte, int(unsafe.Sizeof(v)))
-	case C.SQL_CHAR, C.SQL_VARCHAR:
+	case C.SQL_CHAR, C.SQL_VARCHAR, C.SQL_CLOB:
 		l := int(size)
 		l += 1 // room for null-termination character
 		col.ctype = C.SQL_C_CHAR
