@@ -9,6 +9,8 @@ import "C"
 import (
 	"database/sql/driver"
 	"errors"
+	"regexp"
+	"strings"
 	"unsafe"
 )
 
@@ -21,18 +23,46 @@ type conn struct {
 
 func (d *impl) Open(dsn string) (driver.Conn, error) {
 	var hdbc C.SQLHANDLE
+	re := regexp.MustCompile(`(?i:sqlconnect)\s*;`)
+
 	ret := C.SQLAllocHandle(C.SQL_HANDLE_DBC, d.henv, &hdbc)
 	if !success(ret) {
 		return nil, formatError(C.SQL_HANDLE_ENV, d.henv)
 	}
-	ret = C.SQLDriverConnectW(C.SQLHDBC(hdbc),
-		C.SQLHWND(unsafe.Pointer(uintptr(0))),
-		(*C.SQLWCHAR)(unsafe.Pointer(stringToUTF16Ptr(dsn))),
-		C.SQL_NTS,
-		nil,
-		0,
-		nil,
-		C.SQL_DRIVER_NOPROMPT)
+	if re.MatchString(dsn) {
+		m := make(map[string]string)
+		// init with defaults
+		m["DATABASE"] = "SAMPLE"
+		m["UID"] = ""
+		m["PWD"] = ""
+
+		s := strings.TrimLeft(dsn, re.FindString(dsn))
+		ss := strings.Split(s, ";")
+		for _, pair := range ss {
+			if pair != "" {
+				z := strings.Split(pair, "=")
+				key := strings.ToUpper(strings.Trim(z[0], " "))
+				value := strings.Trim(z[1], " ")
+				m[key] = value
+			}
+		}
+		ret = C.SQLConnectW(C.SQLHDBC(hdbc),
+			(*C.SQLWCHAR)(unsafe.Pointer(stringToUTF16Ptr(m["DATABASE"]))),
+			C.SQL_NTS,
+			(*C.SQLWCHAR)(unsafe.Pointer(stringToUTF16Ptr(m["UID"]))),
+			C.SQL_NTS,
+			(*C.SQLWCHAR)(unsafe.Pointer(stringToUTF16Ptr(m["PWD"]))),
+			C.SQL_NTS)
+	} else {
+		ret = C.SQLDriverConnectW(C.SQLHDBC(hdbc),
+			C.SQLHWND(unsafe.Pointer(uintptr(0))),
+			(*C.SQLWCHAR)(unsafe.Pointer(stringToUTF16Ptr(dsn))),
+			C.SQL_NTS,
+			nil,
+			0,
+			nil,
+			C.SQL_DRIVER_NOPROMPT)
+	}
 
 	if !success(ret) {
 		defer C.SQLFreeHandle(C.SQL_HANDLE_DBC, hdbc)

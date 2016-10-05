@@ -40,7 +40,7 @@ loop:
 			break loop
 		case C.SQL_SUCCESS_WITH_INFO:
 			err := formatError(C.SQL_HANDLE_STMT, C.SQLHANDLE(c.h))
-			if err.SqlState != "01004" {
+			if err.SQLState() != "01004" {
 				return nil, err
 			}
 			// buf is not big enough; data has been truncated
@@ -66,11 +66,15 @@ func (c *column) value() (driver.Value, error) {
 	var err error
 	buf := c.data
 
+	// nil slice b/c SQLBindColumn is not supported for this column.
+	// Need to use SQLGetData to fetch the data from the database.
 	if len(buf) == 0 {
 		buf, err = c.getData()
 		if err != nil {
 			return nil, err
 		}
+	} else if c.len > 0 {
+		buf = buf[:c.len]
 	}
 
 	// c.len is set after calling SQLFetch
@@ -95,7 +99,7 @@ func (c *column) value() (driver.Value, error) {
 			return nil, nil
 		}
 		s := (*[1 << 20]uint16)(p)[:len(buf)/2]
-		return utf16ToUtf8(s), nil
+		return utf16ToUTF8(s), nil
 	case C.SQL_C_TYPE_TIMESTAMP:
 		t := (*sql_TIMESTAMP_STRUCT)(p)
 		r := time.Date(int(t.year),

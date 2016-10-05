@@ -38,7 +38,7 @@ func stringToUTF16Ptr(s string) *uint16 { return &stringToUTF16(s)[0] }
 
 // utf16toutf8 returns the UTF-8 encoding of the UTF-16 sequence s,
 // with a terminating NUL removed.
-func utf16ToUtf8(s []uint16) []byte {
+func utf16ToUTF8(s []uint16) []byte {
 	for i, v := range s {
 		if v == 0 {
 			s = s[0:i]

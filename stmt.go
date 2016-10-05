@@ -174,7 +174,7 @@ func (s *stmt) bindParam(idx int, v driver.Value) error {
 		plen = &buflen
 		size = C.SQLULEN(len(b))
 	default:
-		panic(fmt.Errorf("database/sql/driver: db2 cli driver: unsupported parameter type %T", v))
+		panic(fmt.Errorf("database/sql/driver: [asifjalil][CLI Driver]: unsupported parameter type %T", v))
 	}
 	ret := C.SQLBindParameter(C.SQLHSTMT(s.hstmt), C.SQLUSMALLINT(idx+1),
 		C.SQL_PARAM_INPUT, ctype, sqltype, size, decimal,
@@ -225,7 +225,7 @@ func (s *stmt) bindColumns() error {
 		return formatError(C.SQL_HANDLE_STMT, s.hstmt)
 	}
 	if n < 1 {
-		return errors.New("database/sql/driver: db2 cli: Stmt did not create a result set")
+		return errors.New("database/sql/driver: [asifjalil][CLI Driver]: driver.Stmt.Query(...) did not create a result set")
 	}
 	// fetch column descriptions
 	s.cols = make([]*column, n)
@@ -253,12 +253,23 @@ func (r *rows) Columns() []string {
 }
 
 func (r *rows) Close() error {
-	for i := range r.s.cols {
-		r.s.cols[i] = nil
-	}
-	ret := C.SQLCloseCursor(C.SQLHSTMT(r.s.hstmt))
+	ret := C.SQLFreeStmt(C.SQLHSTMT(r.s.hstmt), C.SQL_UNBIND)
 	if !success(ret) {
 		return formatError(C.SQL_HANDLE_STMT, r.s.hstmt)
+	}
+
+	ret = C.SQLFreeStmt(C.SQLHSTMT(r.s.hstmt), C.SQL_RESET_PARAMS)
+	if !success(ret) {
+		return formatError(C.SQL_HANDLE_STMT, r.s.hstmt)
+	}
+
+	ret = C.SQLFreeStmt(C.SQLHSTMT(r.s.hstmt), C.SQL_CLOSE)
+	if !success(ret) {
+		return formatError(C.SQL_HANDLE_STMT, r.s.hstmt)
+	}
+
+	for i := range r.s.cols {
+		r.s.cols[i] = nil
 	}
 
 	r.s.rows = false
