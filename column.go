@@ -198,7 +198,7 @@ func newColumn(h C.SQLHSTMT, idx int) (*column, error) {
 		l *= 2 // wchars are 2 bytes each
 		col.ctype = C.SQL_C_WCHAR
 		col.data = make([]byte, l)
-	case C.SQL_BINARY, C.SQL_VARBINARY:
+	case C.SQL_BINARY, C.SQL_VARBINARY, C.SQL_BLOB:
 		col.ctype = C.SQL_C_BINARY
 		col.data = make([]byte, size)
 	case C.SQL_XML:
