@@ -3,37 +3,22 @@ package cli_test
 import (
 	"database/sql"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"os"
+	"strings"
 
 	_ "github.com/asifjalil/cli"
 )
 
-// Open connects to a database using CLI function SQLDriverConnect or SQLConnect.
-//
-// To use SQLConnect, start the dsn with keyword sqlconnect. This keyword is case insensitive.
-// The connection string needs to follow this syntax to be valid:
-//
-//	sqlconnect;[DATABASE=<database_name>;][UID=<user_id>;][PWD=<password>;]
-//
-// [...] means optional. If a database_name is not provided, then SAMPLE is
-// used as the database name. Also note that each keyword and value ends with
-// a semicolon. The keyword "sqlconnect" doesn't take a value but ends with a semi-colon.
-//
-// Any other connection string must follow the connection string rule that is
-// valid with SQLDriverConnect. For example, this is a valid dsn/connection string
-// for SQLDriverConnect:
-//
-//	DSN=Sample; UID=asif; PWD=secrect; AUTOCOMMIT=0; CONNECTTYPE=1;
-//
-// Search SQLDriverConnect in DB2 LUW Information Center for more detail.
-// ExampleOpen demonstrates how to connect and disconnect from DB2 database.
 func Example_Open() {
 	var val float64
 
 	connStr := "SQLConnect; Database = Sample;" // trailing semi-colon is required
 	qry := "SELECT double(1.1) FROM sysibm.sysdummy1"
 
-	log.Println("Shows how to connect, query, and disconnect from a DB2 database using the \"cli\" driver")
+	log.Println(strings.Repeat("#", 30))
+	log.Println("Shows how to connect, query, and disconnect from a DB2 database using the \"cli\" driver.")
 	log.Printf("sql.Open(\"cli\",\"%s\")\n", connStr)
 	db, err := sql.Open("cli", connStr)
 	checkError(err)
@@ -51,6 +36,106 @@ func Example_Open() {
 	log.Println("Disconnecting...")
 	log.Printf("db.Close()")
 	// Output: 1.1
+}
+
+func Example_Load() {
+	tabname := "loadtable"
+	createStmt := fmt.Sprintf("CREATE TABLE %s (Col1 VARCHAR(30))", tabname)
+	dropStmt := fmt.Sprintf("DROP TABLE %s", tabname)
+	connStr := "SQLConnect; Database = Sample;"
+
+	log.Println(strings.Repeat("#", 30))
+	log.Println("Shows how to load a table using SYSPROC.ADMIN_CMD and the \"cli\" driver.")
+
+	tmpflName := prepData(tabname)
+
+	db, err := sql.Open("cli", connStr)
+	checkError(err)
+	defer os.Remove(tmpflName)
+	defer db.Close()
+
+	// setup
+	log.Println("Table to load: ", createStmt)
+	_, err = db.Exec(createStmt)
+	checkError(err)
+
+	// load
+	var (
+		rows_read, rows_skipped,
+		rows_loaded, rows_rejected, rows_deleted,
+		rows_committed, rows_partitioned, num_agentinfo_entries sql.NullInt64
+
+		msg_retrieval, msg_removal sql.NullString
+	)
+	admin_cmd := fmt.Sprintf("CALL SYSPROC.ADMIN_CMD('LOAD FROM %s"+
+		" OF DEL REPLACE INTO %s NONRECOVERABLE')", tmpflName, tabname)
+	log.Println("load command: ", admin_cmd)
+
+	rows, err := db.Query(admin_cmd)
+	checkError(err)
+
+	// only get the first result set
+	rows.Next()
+
+	err = rows.Scan(&rows_read, &rows_skipped, &rows_loaded,
+		&rows_rejected, &rows_deleted, &rows_committed,
+		&rows_partitioned, &num_agentinfo_entries,
+		&msg_retrieval, &msg_removal)
+	checkError(err)
+
+	log.Println("Rows Read     : ", rows_read.Int64)
+	log.Println("Rows Skipped  : ", rows_skipped.Int64)
+	log.Println("Rows Loaded   : ", rows_loaded.Int64)
+	log.Println("Rows Rejected : ", rows_rejected.Int64)
+	log.Println("Rows Deleted  : ", rows_deleted.Int64)
+	log.Println("Rows Committed: ", rows_committed.Int64)
+	log.Println("Msg Retrieval : ", msg_retrieval.String)
+	log.Println("Msg Removal   : ", msg_removal.String)
+
+	err = rows.Close()
+	checkError(err)
+
+	// check the data
+	var col1 string
+	selectStmt := fmt.Sprintf("SELECT Col1 FROM %s", tabname)
+	log.Println("select: ", selectStmt)
+	rows, err = db.Query(selectStmt)
+	checkError(err)
+	for rows.Next() {
+		err = rows.Scan(&col1)
+		checkError(err)
+		log.Println(col1)
+		fmt.Println(col1)
+	}
+	checkError(rows.Err())
+	err = rows.Close()
+	checkError(err)
+
+	// cleanup
+	log.Println("Cleanup: ", dropStmt)
+	_, err = db.Exec(dropStmt)
+	checkError(err)
+
+	// Output:
+	// Hello
+	// World
+}
+
+func prepData(filePrefix string) string {
+	wContents := []byte("Hello\nWorld\n")
+
+	tmpfile, err := ioutil.TempFile("", filePrefix)
+	checkError(err)
+
+	// write sample data for loading
+	_, err = tmpfile.Write(wContents)
+	checkError(err)
+
+	// close filehandler
+	err = tmpfile.Close()
+	checkError(err)
+
+	return tmpfile.Name()
 }
 
 func checkError(err error) {
