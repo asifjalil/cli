@@ -11,7 +11,17 @@ import (
 	_ "github.com/asifjalil/cli"
 )
 
-func Example_Open() {
+func Example() {
+	exampleOpen()
+	exampleLoad()
+
+	//Output:
+	//1.1
+	//Hello
+	//World
+}
+
+func exampleOpen() {
 	var val float64
 
 	connStr := "SQLConnect; Database = Sample;" // trailing semi-colon is required
@@ -35,10 +45,9 @@ func Example_Open() {
 
 	log.Println("Disconnecting...")
 	log.Printf("db.Close()")
-	// Output: 1.1
 }
 
-func Example_Load() {
+func exampleLoad() {
 	tabname := "loadtable"
 	createStmt := fmt.Sprintf("CREATE TABLE %s (Col1 VARCHAR(30))", tabname)
 	dropStmt := fmt.Sprintf("DROP TABLE %s", tabname)
@@ -115,10 +124,6 @@ func Example_Load() {
 	log.Println("Cleanup: ", dropStmt)
 	_, err = db.Exec(dropStmt)
 	checkError(err)
-
-	// Output:
-	// Hello
-	// World
 }
 
 func prepData(filePrefix string) string {

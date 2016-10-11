@@ -1,16 +1,19 @@
-// Package cli provides access to a DB2 database using DB2 Call Level Interface (CLI) API.
-// It is based on alexbrainman's odbc package: https://github.com/alexbrainman/odbc.
+// Package **cli** provides access to a **DB2 database** on Linux, Unix, and Windows (LUW)
+// using DB2 Call Level Interface (**CLI**) API.
+// **cli** is based on *alexbrainman's* odbc package: https://github.com/alexbrainman/odbc.
 //
-// This package registers a driver for the standard Go database/sql package and used through the
-// database/sql API.
+// This package registers a driver for the standard Go **database/sql** package and used through the
+// **database/sql** API.
 //
 //	import _ "github.com/asifjalil/cli"
 //
-// The package has no exported API except two functions-SQLCode() and SQLState()-for inspecting
+// ###Error Handling
+// The package has no exported API except two functions-**SQLCode()** and **SQLState()**-for inspecting
 // DB2 CLI error. The function signature is as follows:
 //	func (e *cliError) SQLCode() int
 //	func (e *cliError) SQLState() string
-// Since this package is imported for side-effects only, use the following code
+//
+// Since package **cli** is imported for side-effects only, use the following code
 // pattern to access SQLCode() and SQLState():
 //	func checkError(err error) {
 //		type sqlcode interface {
@@ -25,7 +28,7 @@
 //	}
 // The local interface can include SQLState() also for inspecting SQLState from DB2 CLI.
 //
-// SQLCODE is a return code from a IBM DB2 SQL operation.
+// **SQLCODE** is a return code from a IBM DB2 SQL operation.
 // This code can be zero (0), negative, or positive.
 //      0 means successful execution.
 //      Negative means unsuccessful execution with an error.
@@ -35,13 +38,14 @@
 //
 // Search "SQL messages" in DB2 Information Center to find out more about SQLCODE.
 //
-// SQLSTATE is a return code like SQLCODE.
+// **SQLSTATE** is a return code like SQLCODE.
 // But instead of a number, it is a five character error code that is consistent across all IBM database products.
 // SQLSTATE follows this format: ccsss, where cc indicates class and sss indicates subclass.
 // Search "SQLSTATE Messages" in DB2 Information Center for more detail.
 //
-// This driver uses SQLConnect and SQLDriverConnect in driver.Open(...).
-// To use SQLConnect, start the name string with keyword sqlconnect. This keyword is case insensitive.
+// ###Connection String
+// This driver uses DB2 CLI function **SQLConnect** and **SQLDriverConnect** in driver.Open(...).
+// To use **SQLConnect**, start the name or the DSN string with keyword sqlconnect. This keyword is case insensitive.
 // The connection string needs to follow this syntax to be valid:
 //
 //      "sqlconnect;[DATABASE=<database_name>;][UID=<user_id>;][PWD=<password>;]"
@@ -62,8 +66,9 @@
 //	db, err := sql.Open("cli", "DSN=Sample; UID=asif; PWD=secrect; AUTOCOMMIT=0; CONNECTTYPE=1;")
 //	db, err := sql.Open("cli", "DATABASE=db; HOSTNAME=dbhost; PORT=40000; PROTOCOL=TCPIP; UID=me; PWD=secret;")
 //
-// Search SQLDriverConnect in DB2 LUW Information Center for more detail.
+// Search **SQLDriverConnect** in DB2 LUW *Information Center* for more detail.
 //
+// ## Installation
 // IBM DB2 for Linux, Unix and Windows (DB2 LUW) implements its own ODBC driver.
 // This package uses the DB2 ODBC/CLI driver through cgo.
 // As such this package requires DB2 C headers and libraries for compilation.
@@ -83,6 +88,9 @@
 // library and CLI C header files.
 // Then run:
 //	go install
+//
+// ##Usage
+// See `example_test.go`.
 package cli
 
 /*
