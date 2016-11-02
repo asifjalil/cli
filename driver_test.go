@@ -14,7 +14,7 @@ type testDB struct {
 	*sql.DB
 }
 
-func newTestDB() *testDB {
+func newTestDB() (*testDB, error) {
 	config := struct {
 		database string
 		uid      string
@@ -42,10 +42,10 @@ func newTestDB() *testDB {
 
 	db, err := sql.Open("cli", connStr)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	return &testDB{db}
+	return &testDB{db}, nil
 }
 
 func (db *testDB) close() {
@@ -60,9 +60,12 @@ func TestScan(t *testing.T) {
 		f1 float64
 	)
 
-	db := newTestDB()
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer db.close()
-	err := db.QueryRow("values('hello', NULL, 12345, 12345.6789)").Scan(&s1,
+	err = db.QueryRow("values('hello', NULL, 12345, 12345.6789)").Scan(&s1,
 		&s2, &i1, &f1)
 	switch {
 	case err != nil:
@@ -81,13 +84,16 @@ func TestTimeStamp(t *testing.T) {
 	// But Go timestamp accuracy is up to a nanosecond or 9 digits.
 	// So the last 3 digits in 9 digits must be 0.
 	ts := time.Date(2009, time.November, 10, 23, 6, 29, 10011001000, time.UTC)
-	db := newTestDB()
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer db.close()
 
 	// start transaction
 	tx, err := db.Begin()
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 
 	// insert value
@@ -151,7 +157,10 @@ func TestXML(t *testing.T) {
 			CAST (? AS VARCHAR(128)) AS "cityName")`, val: "Aurora"},
 	}
 
-	db := newTestDB()
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer db.close()
 
 	for i, tc := range testCases {
@@ -183,7 +192,10 @@ func TestLob(t *testing.T) {
 				WHERE empno = ? AND resume_format = ?`, val: []string{"000140", "ascii"}},
 	}
 
-	db := newTestDB()
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer db.close()
 
 	for i, tc := range testCases {
