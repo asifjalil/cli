@@ -212,3 +212,63 @@ func TestLob(t *testing.T) {
 		})
 	}
 }
+
+func TestRowsColumnTypes(t *testing.T) {
+	testCases := []struct {
+		qry             string
+		colTypes        []string
+		colNullables    []bool
+		colIsVarLengths []bool
+		colScales       []int64
+	}{
+		{qry: `SELECT current timestamp, current date, current time, ' A  ', 100, 1.101, cast(NULL as INT)
+		FROM sysibm.sysdummy1`,
+			colTypes:        []string{"TIMESTAMP", "DATE", "TIME", "VARCHAR", "INTEGER", "DECIMAL", "INTEGER"},
+			colNullables:    []bool{false, false, false, false, false, false, true},
+			colIsVarLengths: []bool{false, false, false, true, false, false, false},
+			colScales:       []int64{6, 0, 0, 0, 0, 3, 0},
+		},
+	}
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	for i, tc := range testCases {
+		t.Run(fmt.Sprintf("Testcase %d", i), func(t *testing.T) {
+			rows, err := db.Query(tc.qry)
+			if err != nil {
+				t.Fatalf("Query: %v", err)
+			}
+			ct, err := rows.ColumnTypes()
+			if err != nil {
+				t.Fatalf("ColumnTypes: %v", err)
+			}
+			for i := range ct {
+				colType := ct[i].DatabaseTypeName()
+				if colType != tc.colTypes[i] {
+					t.Error("Expected ColType: ", tc.colTypes[i], ", Got ColType: ", colType)
+				}
+
+				nullable, _ := ct[i].Nullable()
+				if nullable != tc.colNullables[i] {
+					t.Error("Expected Col Nullability: ", tc.colNullables[i], ", Got Col Nullability: ", nullable)
+				}
+
+				length, isVarLength := ct[i].Length()
+				if isVarLength != tc.colIsVarLengths[i] {
+					t.Error("For column type ", colType, " Expected variable length to be: ", tc.colIsVarLengths[i], ", Got variable length to be: ", isVarLength)
+				}
+
+				precision, scale, _ := ct[i].DecimalSize()
+				t.Log("Type: ", ct[i].DatabaseTypeName(), ", length(precision): ", length, "(", precision, "), scale: ", scale)
+
+				if scale != tc.colScales[i] {
+					t.Error("Expected Col Scale: ", tc.colScales[i], ", Got Col Scale: ", scale)
+				}
+
+			}
+		})
+	}
+}

@@ -14,12 +14,17 @@ import (
 )
 
 type column struct {
-	h     C.SQLHSTMT
-	idx   int    // column position; starts from 0
-	name  string // column name
-	ctype C.SQLSMALLINT
-	data  []byte   // data returned from the database
-	len   C.SQLLEN // StrLen_or_IndPtr; Indicates the size of the data fetched into data
+	h                C.SQLHSTMT
+	idx              int    // column position; starts from 0
+	name             string // column name
+	databaseTypeName string // column type name
+	nullable         bool   // true if the column value can be null; otherwise false
+	size             int64  // precision of column
+	scale            int64  // scale of column
+	sqltype          C.SQLSMALLINT
+	ctype            C.SQLSMALLINT
+	data             []byte   // data returned from the database
+	len              C.SQLLEN // StrLen_or_IndPtr; Indicates the size of the data fetched into data
 }
 
 func (c *column) getData() ([]byte, error) {
@@ -59,6 +64,68 @@ loop:
 		}
 	}
 	return total, nil
+}
+
+func (c *column) typeName() string {
+	switch c.sqltype {
+	case C.SQL_BIT:
+		return "BIT"
+	case C.SQL_TINYINT, C.SQL_SMALLINT:
+		return "SMALLINT"
+	case C.SQL_INTEGER:
+		return "INTEGER"
+	case C.SQL_BIGINT:
+		return "BIGINT"
+	case C.SQL_DOUBLE:
+		return "DOUBLE"
+	case C.SQL_DECIMAL:
+		return "DECIMAL"
+	case C.SQL_NUMERIC:
+		return "NUMERIC"
+	case C.SQL_FLOAT:
+		return "FLOAT"
+	case C.SQL_REAL:
+		return "REAL"
+	case C.SQL_TYPE_TIMESTAMP:
+		return "TIMESTAMP"
+	case C.SQL_TYPE_DATE:
+		return "DATE"
+	case C.SQL_TYPE_TIME:
+		return "TIME"
+	case C.SQL_CHAR, C.SQL_WCHAR:
+		return "CHARACTER"
+	case C.SQL_VARCHAR, C.SQL_WVARCHAR:
+		return "VARCHAR"
+	case C.SQL_CLOB:
+		return "CLOB"
+	case C.SQL_BLOB:
+		return "BLOB"
+	case C.SQL_BINARY:
+		return "BINARY"
+	case C.SQL_VARBINARY:
+		return "VARBINARY"
+	case C.SQL_XML:
+		return "XML"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+func (c *column) typeNullable() (nullable, ok bool) {
+	return c.nullable, true
+}
+
+func (c *column) typePrecisionScale() (precision, scale int64, ok bool) {
+	return c.size, c.scale, c.scale > 0
+}
+
+func (c *column) typeLength() (length int64, ok bool) {
+	switch c.sqltype {
+	case C.SQL_VARCHAR, C.SQL_WVARCHAR, C.SQL_CLOB, C.SQL_BLOB,
+		C.SQL_VARBINARY, C.SQL_XML:
+		ok = true
+	}
+	return c.size, ok
 }
 
 func (c *column) value() (driver.Value, error) {
@@ -134,34 +201,38 @@ func (c *column) value() (driver.Value, error) {
 }
 
 func describeColumn(h C.SQLHSTMT, idx int, namebuf []uint16) (namelen int,
-	sqltype C.SQLSMALLINT, size C.SQLULEN, ret C.SQLRETURN) {
-	var l, decimal, nullable C.SQLSMALLINT
+	sqltype C.SQLSMALLINT, size C.SQLULEN, ret C.SQLRETURN, nullOK bool, scale C.SQLSMALLINT) {
+	var l, nullable C.SQLSMALLINT
 
 	ret = C.SQLDescribeColW(h, C.SQLUSMALLINT(idx+1),
 		(*C.SQLWCHAR)(unsafe.Pointer(&namebuf[0])),
 		C.SQLSMALLINT(len(namebuf)),
-		&l, &sqltype, &size, &decimal, &nullable)
+		&l, &sqltype, &size, &scale, &nullable)
 
-	return int(l), sqltype, size, ret
+	return int(l), sqltype, size, ret, nullable == C.SQL_NULLABLE, scale
 }
 
 func newColumn(h C.SQLHSTMT, idx int) (*column, error) {
 	namebuf := make([]uint16, 150)
-	namelen, sqltype, size, ret := describeColumn(h, idx, namebuf)
+	namelen, sqltype, size, ret, nullable, scale := describeColumn(h, idx, namebuf)
 	if ret == C.SQL_SUCCESS_WITH_INFO && namelen > len(namebuf) {
 		namebuf = make([]uint16, namelen)
-		namelen, sqltype, size, ret = describeColumn(h, idx, namebuf)
+		namelen, sqltype, size, ret, nullable, scale = describeColumn(h, idx, namebuf)
 	}
 	if !success(ret) {
 		return nil, formatError(C.SQL_HANDLE_STMT, C.SQLHANDLE(h))
 	}
 	col := &column{
-		h:    h,
-		idx:  idx,
-		name: utf16ToString(namebuf[:namelen]),
+		h:        h,
+		idx:      idx,
+		name:     utf16ToString(namebuf[:namelen]),
+		nullable: nullable,
+		size:     int64(size),
+		scale:    int64(scale),
 	}
 
 	// [set column C-Type and allocate byte buffer to hold value from the database]
+	col.sqltype = sqltype
 	switch sqltype {
 	case C.SQL_BIT:
 		col.ctype = C.SQL_C_BIT

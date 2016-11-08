@@ -299,6 +299,23 @@ func (r *rows) Next(dest []driver.Value) error {
 	return nil
 }
 
+// [ -- driver.Rows Go 1.8 features --]
+func (r *rows) ColumnTypeDatabaseTypeName(index int) string {
+	return r.s.cols[index].typeName()
+}
+
+func (r *rows) ColumnTypeNullable(index int) (nullable, ok bool) {
+	return r.s.cols[index].typeNullable()
+}
+
+func (r *rows) ColumnTypePrecisionScale(index int) (precision, scale int64, ok bool) {
+	return r.s.cols[index].typePrecisionScale()
+}
+
+func (r *rows) ColumnTypeLength(index int) (length int64, ok bool) {
+	return r.s.cols[index].typeLength()
+}
+
 // [ -- driver.Result --]
 type result struct {
 	id   int64
