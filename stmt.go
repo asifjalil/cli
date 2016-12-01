@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"time"
 	"unsafe"
 )
@@ -299,7 +300,7 @@ func (r *rows) Next(dest []driver.Value) error {
 	return nil
 }
 
-// [ -- driver.Rows Go 1.8 features --]
+// [ -- driver.Rows Go 1.8+ features --]
 func (r *rows) ColumnTypeDatabaseTypeName(index int) string {
 	return r.s.cols[index].typeName()
 }
@@ -314,6 +315,10 @@ func (r *rows) ColumnTypePrecisionScale(index int) (precision, scale int64, ok b
 
 func (r *rows) ColumnTypeLength(index int) (length int64, ok bool) {
 	return r.s.cols[index].typeLength()
+}
+
+func (r *rows) ColumnTypeScanType(index int) reflect.Type {
+	return r.s.cols[index].scanType()
 }
 
 // [ -- driver.Result --]

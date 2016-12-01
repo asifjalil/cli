@@ -9,6 +9,7 @@ import "C"
 import (
 	"database/sql/driver"
 	"fmt"
+	"reflect"
 	"time"
 	"unsafe"
 )
@@ -126,6 +127,27 @@ func (c *column) typeLength() (length int64, ok bool) {
 		ok = true
 	}
 	return c.size, ok
+}
+
+func (c *column) scanType() reflect.Type {
+	switch c.ctype {
+	case C.SQL_C_BIT:
+		return reflect.TypeOf(false)
+	case C.SQL_C_LONG:
+		return reflect.TypeOf(int32(0))
+	case C.SQL_C_SBIGINT:
+		return reflect.TypeOf(int64(0))
+	case C.SQL_C_DOUBLE:
+		return reflect.TypeOf(float64(0.0))
+	case C.SQL_C_CHAR, C.SQL_C_WCHAR:
+		return reflect.TypeOf(string(""))
+	case C.SQL_C_TYPE_DATE, C.SQL_C_TYPE_TIME, C.SQL_C_TYPE_TIMESTAMP:
+		return reflect.TypeOf(time.Time{})
+	case C.SQL_C_BINARY:
+		return reflect.TypeOf([]byte(nil))
+	default:
+		return reflect.TypeOf(new(interface{}))
+	}
 }
 
 func (c *column) value() (driver.Value, error) {
