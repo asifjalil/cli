@@ -175,7 +175,7 @@ func (c *column) value() (driver.Value, error) {
 	switch c.ctype {
 	case C.SQL_C_BIT:
 		return buf[0] != 0, nil
-	case C.SQL_C_LONG:
+	case C.SQL_C_SHORT, C.SQL_C_LONG:
 		return *((*int32)(p)), nil
 	case C.SQL_C_SBIGINT:
 		return *((*int64)(p)), nil
