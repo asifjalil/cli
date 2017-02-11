@@ -102,7 +102,7 @@ but not a DB2 database manager.
 To install, download this package by running the following:
 
 
-	got get -d github.com/asifjalil/cli
+	go get -d github.com/asifjalil/cli
 
 Go to the following directory:
 
