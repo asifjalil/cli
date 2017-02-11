@@ -91,7 +91,7 @@ func (s *stmt) Query(args []driver.Value) (driver.Rows, error) {
 		return nil, err
 	}
 	s.rows = true
-	return &rows{s}, nil
+	return &rows{s, true}, nil
 }
 
 // bindParam binds a driver.Value (Go value) to a parameter marker in an SQL statement
@@ -243,6 +243,8 @@ func (s *stmt) bindColumns() error {
 // [ -- driver.Rows ]
 type rows struct {
 	s *stmt
+	// Used to implement HasNextResultSet()
+	hasNextResultSet bool
 }
 
 func (r *rows) Columns() []string {
@@ -319,6 +321,22 @@ func (r *rows) ColumnTypeLength(index int) (length int64, ok bool) {
 
 func (r *rows) ColumnTypeScanType(index int) reflect.Type {
 	return r.s.cols[index].scanType()
+}
+
+func (r *rows) HasNextResultSet() bool {
+	return r.hasNextResultSet
+}
+
+func (r *rows) NextResultSet() error {
+	switch ret := C.SQLMoreResults(C.SQLHSTMT(r.s.hstmt)); ret {
+	case C.SQL_SUCCESS:
+		return nil
+	case C.SQL_NO_DATA_FOUND:
+		r.hasNextResultSet = false
+		return io.EOF
+	default:
+		return formatError(C.SQL_HANDLE_STMT, C.SQLHANDLE(r.s.hstmt))
+	}
 }
 
 // [ -- driver.Result --]
