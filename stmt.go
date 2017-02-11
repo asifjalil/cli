@@ -330,7 +330,8 @@ func (r *rows) HasNextResultSet() bool {
 func (r *rows) NextResultSet() error {
 	switch ret := C.SQLMoreResults(C.SQLHSTMT(r.s.hstmt)); ret {
 	case C.SQL_SUCCESS:
-		return nil
+		err := r.s.bindColumns()
+		return err
 	case C.SQL_NO_DATA_FOUND:
 		r.hasNextResultSet = false
 		return io.EOF
