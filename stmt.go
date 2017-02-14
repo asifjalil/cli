@@ -7,6 +7,7 @@ package cli
 */
 import "C"
 import (
+	"context"
 	"database/sql/driver"
 	"errors"
 	"fmt"
@@ -54,17 +55,27 @@ func (s *stmt) NumInput() int {
 }
 
 func (s *stmt) Exec(args []driver.Value) (driver.Result, error) {
-	if s.closed {
-		panic("database/sql/driver: [asifjalil][CLI Driver]: Exec after Close")
-	}
-	if s.rows {
-		panic("database/sql/driver: [asifjalil][CLI Driver]: Exec with active Rows")
+	return s.exec(context.Background(), args)
+}
+
+// go1.8+
+// ExecContext implements driver.StmtExecContext interface
+func (s *stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
+	dargs := make([]driver.Value, len(args))
+	for n, param := range args {
+		dargs[n] = param.Value
 	}
 
-	err := s.exec(args)
+	return s.exec(ctx, dargs)
+}
+
+// exec is created to handle both Exec(...) and ExecContext(...)
+func (s *stmt) exec(ctx context.Context, args []driver.Value) (driver.Result, error) {
+	err := s.sqlexec(ctx, args)
 	if err != nil {
 		return nil, err
 	}
+
 	r, err := s.rowsAffected()
 	if err != nil {
 		return nil, err
@@ -74,18 +85,28 @@ func (s *stmt) Exec(args []driver.Value) (driver.Result, error) {
 }
 
 func (s *stmt) Query(args []driver.Value) (driver.Rows, error) {
-	if s.closed {
-		panic("database/sql/driver: [asifjalil][CLI Driver]: Query after stmt Close")
-	}
-	if s.rows {
-		panic("database/sql/driver: [asifjalil][CLI Driver]: Query with active Rows")
+	return s.query(context.Background(), args)
+}
+
+// go1.8+
+// QueryContext implements driver.StmtQueryContext interface
+func (s *stmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+	dargs := make([]driver.Value, len(args))
+	for n, param := range args {
+		dargs[n] = param.Value
 	}
 
-	err := s.exec(args)
+	return s.query(ctx, dargs)
+}
+
+// query is created to handle both Query(...) and QueryContext(...)
+func (s *stmt) query(ctx context.Context, args []driver.Value) (driver.Rows, error) {
+	err := s.sqlexec(ctx, args)
 	if err != nil {
 		return nil, err
 	}
 
+	// attach the statement to the result set columns
 	err = s.bindColumns()
 	if err != nil {
 		return nil, err
@@ -186,8 +207,62 @@ func (s *stmt) bindParam(idx int, v driver.Value) error {
 	return nil
 }
 
-// exec executes any prepared statement
-func (s *stmt) exec(args []driver.Value) error {
+// sqlexec executes any prepared statement
+func (s *stmt) sqlexec(ctx context.Context, args []driver.Value) error {
+	if s.closed {
+		panic("database/sql/driver: [asifjalil][CLI Driver]: Query after stmt Close")
+	}
+	if s.rows {
+		panic("database/sql/driver: [asifjalil][CLI Driver]: Query with active Rows")
+	}
+
+	// go1.8+
+	// check if the context has a deadline
+	if _, ok := ctx.Deadline(); ok {
+		/*
+			// Initially used the timeout seconds from the context
+			// as the timeout value for SQL_ATTR_QRY_TIMEOUT.
+			// But DB2 didn't terminate the statement on time as expected.
+			// As a result stmt.Close(...) function waited until the query is done
+			// before freeing the stmt handle.
+			timeout := deadline.Sub(time.Now())
+			timeoutSec := C.SQLINTEGER(timeout.Seconds())
+			fmt.Printf("timeout(sec): %t\n", timeoutSec)
+
+			ret := C.SQLSetStmtAttr(C.SQLHSTMT(s.hstmt),
+				C.SQL_ATTR_QUERY_TIMEOUT,
+				C.SQLPOINTER(uintptr(timeoutSec)),
+				C.SQL_IS_UINTEGER)
+			if !success(ret) {
+				return formatError(C.SQL_HANDLE_STMT, s.hstmt)
+			}
+
+			var realTimeout C.SQLINTEGER
+			ret = C.SQLGetStmtAttr(C.SQLHSTMT(s.hstmt),
+				C.SQL_ATTR_QUERY_TIMEOUT,
+				C.SQLPOINTER(&realTimeout),
+				0, nil)
+
+			if !success(ret) {
+				return formatError(C.SQL_HANDLE_STMT, s.hstmt)
+			}
+
+			fmt.Printf("real timeout(sec): %t\n", realTimeout)
+		*/
+
+		// Enabling option to call SQLExecute asynchronously.
+		// This way, we can use SQLCancel to cancel the query when
+		// the context times out.
+		ret := C.SQLSetStmtAttr(C.SQLHSTMT(s.hstmt),
+			C.SQL_ATTR_ASYNC_ENABLE,
+			C.SQLPOINTER(uintptr(C.SQL_ASYNC_ENABLE_ON)),
+			0)
+
+		if !success(ret) {
+			return formatError(C.SQL_HANDLE_STMT, s.hstmt)
+		}
+	}
+
 	// bind values to parameters
 	for i, a := range args {
 		err := s.bindParam(i, a)
@@ -197,12 +272,44 @@ func (s *stmt) exec(args []driver.Value) error {
 	}
 
 	// execute the statement
-	ret := C.SQLExecute(C.SQLHSTMT(s.hstmt))
-	if ret == C.SQL_NO_DATA_FOUND {
-		// may this is a searched UPDATE/DELETE and no row satisfied the search condition
-	}
-	if !success(ret) {
-		return formatError(C.SQL_HANDLE_STMT, s.hstmt)
+	qry := make(chan C.SQLRETURN)
+	go func() {
+		var ret C.SQLRETURN
+		if _, ok := ctx.Deadline(); ok {
+			// When the context has a deadline, the stmt handle
+			// will run the query asynchronously. Use a for loop to wait for it.
+			for {
+				ret = C.SQLExecute(C.SQLHSTMT(s.hstmt))
+				if ret != C.SQL_STILL_EXECUTING {
+					break
+				}
+			}
+		} else {
+			ret = C.SQLExecute(C.SQLHSTMT(s.hstmt))
+		}
+		qry <- ret
+		close(qry)
+	}()
+
+	// go1.8+ feature: using Context
+	select {
+	case <-ctx.Done():
+		ret := C.SQLCancel(C.SQLHSTMT(s.hstmt))
+		if !success(ret) {
+			return formatError(C.SQL_HANDLE_STMT, s.hstmt)
+		}
+
+		errStr := ctx.Err().Error()
+		return &cliError{sqlcode: 0,
+			sqlstate: "HY008",
+			message:  errStr + ": SQL Operation was cancelled."}
+	case ret := <-qry:
+		if ret == C.SQL_NO_DATA_FOUND {
+			// may this is a searched UPDATE/DELETE and no row satisfied the search condition
+		}
+		if !success(ret) {
+			return formatError(C.SQL_HANDLE_STMT, s.hstmt)
+		}
 	}
 
 	return nil
