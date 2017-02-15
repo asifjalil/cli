@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -14,6 +15,18 @@ type testDB struct {
 	*sql.DB
 }
 
+func getDB2Error(sqlerr error) (int, string, bool) {
+	type sqlcode interface {
+		SQLCode() int
+		SQLState() string
+	}
+
+	if err, ok := sqlerr.(sqlcode); ok {
+		return err.SQLCode(), err.SQLState(), ok
+	}
+
+	return 0, "", false
+}
 func newTestDB() (*testDB, error) {
 	config := struct {
 		database string
@@ -65,7 +78,7 @@ func TestScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.close()
-	err = db.QueryRow("values('hello', NULL, 12345, 12345.6789)").Scan(&s1,
+	err = db.QueryRowContext(context.Background(), "values('hello', NULL, 12345, 12345.6789)").Scan(&s1,
 		&s2, &i1, &f1)
 	switch {
 	case err != nil:
@@ -98,6 +111,12 @@ func TestTimeStamp(t *testing.T) {
 
 	// insert value
 	_, err = tx.Exec(`INSERT INTO in_tray(received, source, subject, note_text) 
+		VALUES(?, ?, ?, ?)`, ts, "TEST", nil, nil)
+	if err != nil {
+		t.Error(err)
+	}
+
+	_, err = tx.ExecContext(context.Background(), `INSERT INTO in_tray(received, source, subject, note_text) 
 		VALUES(?, ?, ?, ?)`, ts, "TEST", nil, nil)
 	if err != nil {
 		t.Error(err)
@@ -237,7 +256,7 @@ func TestRowsColumnTypes(t *testing.T) {
 
 	for i, tc := range testCases {
 		t.Run(fmt.Sprintf("Testcase %d", i), func(t *testing.T) {
-			rows, err := db.Query(tc.qry)
+			rows, err := db.QueryContext(context.Background(), tc.qry)
 			if err != nil {
 				t.Fatalf("Query: %v", err)
 			}
@@ -270,5 +289,37 @@ func TestRowsColumnTypes(t *testing.T) {
 
 			}
 		})
+	}
+}
+
+func TestQueryContext(t *testing.T) {
+	var rc int
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = db.QueryRowContext(ctx, "values SLEEP(60)").Scan(&rc)
+
+	switch {
+	case err != nil:
+		if _, sqlstate, ok := getDB2Error(err); ok {
+			switch {
+			case sqlstate == "42884":
+				t.Log("SLEEP function is missing. Ok to skip the test")
+			case sqlstate == "HY008":
+				t.Log("All Ok!")
+			default:
+				t.Errorf("The test is not expecting this CLI error: %s\n", err)
+			}
+		} else {
+			t.Errorf("Expected CLI error with SQLCode and SqlState; instead got this error: %s\n", err)
+		}
+	default:
+		t.Log("Expected the query to fail, but it didn't.")
 	}
 }
