@@ -7,8 +7,11 @@ package cli
 */
 import "C"
 import (
+	"context"
+	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"unsafe"
@@ -94,28 +97,53 @@ func (c *conn) Close() error {
 	return nil
 }
 
+// Prepare allocates a statement handle and associates the sql string with the handle.
 func (c *conn) Prepare(sql string) (driver.Stmt, error) {
-	var hstmt C.SQLHANDLE // stmt handle
-	wsql := stringToUTF16Ptr(sql)
+	return c.PrepareContext(context.Background(), sql)
+}
+
+// Similar to Prepare but additionally uses a context. If the context is cancelled then
+// the function returns an error and a nil statement handle.
+func (c *conn) PrepareContext(ctx context.Context, sql string) (driver.Stmt, error) {
+	var hstmt C.SQLHANDLE = C.SQL_NULL_HSTMT // stmt handle
 
 	if c.closed {
 		panic("database/sql/driver: [asifjalil][CLI Driver]: Prepare after conn Close")
 	}
 
-	// allocate statement handle
-	ret := C.SQLAllocHandle(C.SQL_HANDLE_STMT, c.hdbc, &hstmt)
-	if !success(ret) {
-		return nil, formatError(C.SQL_HANDLE_DBC, c.hdbc)
-	}
+	done := make(chan error, 1) // indicates when the anonymous function is done
+	// allocates a stmt handle to hstmt
+	go func() {
+		wsql := stringToUTF16Ptr(sql)
+		// allocate stmt handle
+		ret := C.SQLAllocHandle(C.SQL_HANDLE_STMT, c.hdbc, &hstmt)
+		if !success(ret) {
+			done <- formatError(C.SQL_HANDLE_DBC, c.hdbc)
+			close(done)
+		}
 
-	// prepare the query
-	ret = C.SQLPrepareW(C.SQLHSTMT(hstmt),
-		(*C.SQLWCHAR)(unsafe.Pointer(wsql)), C.SQL_NTS)
-	if !success(ret) {
-		err := formatError(C.SQL_HANDLE_STMT, hstmt)
-		// free the statement handle before returning
-		C.SQLFreeHandle(C.SQL_HANDLE_STMT, hstmt)
-		return nil, err
+		// prepare the query
+		ret = C.SQLPrepareW(C.SQLHSTMT(hstmt),
+			(*C.SQLWCHAR)(unsafe.Pointer(wsql)), C.SQL_NTS)
+		if !success(ret) {
+			done <- formatError(C.SQL_HANDLE_STMT, hstmt)
+			C.SQLFreeHandle(C.SQL_HANDLE_STMT, hstmt)
+			close(done)
+		}
+		done <- nil
+		close(done)
+	}()
+
+	select {
+	case <-ctx.Done():
+		if hstmt != C.SQL_NULL_HSTMT {
+			C.SQLFreeHandle(C.SQL_HANDLE_STMT, hstmt)
+		}
+		return nil, ctx.Err()
+	case err := <-done:
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &stmt{
@@ -125,14 +153,61 @@ func (c *conn) Prepare(sql string) (driver.Stmt, error) {
 }
 
 func (c *conn) Begin() (driver.Tx, error) {
+	return c.BeginTx(context.Background(), driver.TxOptions{})
+}
+
+func (c *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	if c.tx {
 		panic("database/sql/driver: [asifjalil][CLI driver]: multiple Tx")
 	}
+
 	// turn off autocommit
 	err := c.setAutoCommitAttr(C.SQL_AUTOCOMMIT_OFF)
 	if err != nil {
 		return nil, err
 	}
+
+	// Set ReadOnly
+	if opts.ReadOnly {
+		ret := C.SQLSetConnectAttr(C.SQLHDBC(c.hdbc), C.SQL_ATTR_ACCESS_MODE,
+			C.SQLPOINTER(uintptr(C.SQL_MODE_READ_ONLY)), C.SQL_IS_INTEGER)
+		if !success(ret) {
+			return nil, formatError(C.SQL_HANDLE_STMT, c.hdbc)
+		}
+	}
+
+	// Set isolation level
+	err = nil
+	switch level := sql.IsolationLevel(opts.Isolation); level {
+	case sql.LevelDefault, sql.LevelReadCommitted:
+		// nothing to do
+	case sql.LevelReadUncommitted:
+		err = c.setIsolationLevel(C.SQL_TXN_READ_UNCOMMITTED)
+	case sql.LevelWriteCommitted:
+		err = errors.New("database/sql/driver: [asifjalil][CLI Driver]: sql.LevelWriteCommitted isolation level is not supported")
+	case sql.LevelRepeatableRead:
+		// RS (read-stability) isolation
+		err = c.setIsolationLevel(C.SQL_TXN_REPEATABLE_READ)
+	case sql.LevelSnapshot:
+		err = errors.New("database/sql/driver: [asifjalil][CLI Driver]: sql.LevelSnapshot isolation level is not supported")
+	case sql.LevelSerializable:
+		// RR isolation
+		err = c.setIsolationLevel(C.SQL_TXN_SERIALIZABLE)
+	case sql.LevelLinearizable:
+		err = errors.New("database/sql/driver: [asifjalil][CLI Driver]: sql.LevelLinearizable isolation level is not supported")
+	default:
+		err = fmt.Errorf("database/sql/driver: [asifjalil][CLI Driver]: isolation level %v is not supported",
+			sql.IsolationLevel(opts.Isolation))
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
 	c.tx = true
 	return &tx{c}, nil
 }
@@ -144,6 +219,17 @@ func (c *conn) setAutoCommitAttr(a uintptr) error {
 	if !success(ret) {
 		return formatError(C.SQL_HANDLE_STMT, c.hdbc)
 	}
+	return nil
+}
+
+// Sets Isolation Level for a connection
+func (c *conn) setIsolationLevel(a uintptr) error {
+	ret := C.SQLSetConnectAttr(C.SQLHDBC(c.hdbc), C.SQL_ATTR_TXN_ISOLATION,
+		C.SQLPOINTER(a), C.SQL_NTS)
+	if !success(ret) {
+		return formatError(C.SQL_HANDLE_STMT, c.hdbc)
+	}
+
 	return nil
 }
 

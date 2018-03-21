@@ -310,11 +310,11 @@ func TestQueryContext(t *testing.T) {
 		if _, sqlstate, ok := getDB2Error(err); ok {
 			switch {
 			case sqlstate == "42884":
-				t.Log("SLEEP function is missing. Ok to skip the test")
+				t.Log("SLEEP function is missing. Skip the test.")
 			case sqlstate == "HY008":
 				t.Log("All Ok!")
 			default:
-				t.Errorf("The test is not expecting this CLI error: %s\n", err)
+				t.Errorf("Unexpected CLI error: %s\n", err)
 			}
 		} else {
 			t.Errorf("Expected CLI error with SQLCode and SqlState; instead got this error: %s\n", err)
@@ -322,4 +322,30 @@ func TestQueryContext(t *testing.T) {
 	default:
 		t.Log("Expected the query to fail, but it didn't.")
 	}
+}
+
+func TestTxPrepareContext(t *testing.T) {
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stmt, err := tx.PrepareContext(context.Background(), "select count(*) from syscat.tables")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := stmt.Query()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows.Close()
+	stmt.Close()
+	tx.Commit()
 }
