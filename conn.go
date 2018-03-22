@@ -111,41 +111,37 @@ func (c *conn) PrepareContext(ctx context.Context, sql string) (driver.Stmt, err
 		panic("database/sql/driver: [asifjalil][CLI Driver]: Prepare after conn Close")
 	}
 
-	done := make(chan error, 1) // indicates when the anonymous function is done
 	// allocates a stmt handle to hstmt
-	go func() {
-		wsql := stringToUTF16Ptr(sql)
-		// allocate stmt handle
-		ret := C.SQLAllocHandle(C.SQL_HANDLE_STMT, c.hdbc, &hstmt)
-		if !success(ret) {
-			done <- formatError(C.SQL_HANDLE_DBC, c.hdbc)
-			close(done)
-		}
+	wsql := stringToUTF16Ptr(sql)
+	// allocate stmt handle
+	ret := C.SQLAllocHandle(C.SQL_HANDLE_STMT, c.hdbc, &hstmt)
+	if !success(ret) {
+		return nil, formatError(C.SQL_HANDLE_DBC, c.hdbc)
+	}
 
-		// prepare the query
-		ret = C.SQLPrepareW(C.SQLHSTMT(hstmt),
-			(*C.SQLWCHAR)(unsafe.Pointer(wsql)), C.SQL_NTS)
-		if !success(ret) {
-			done <- formatError(C.SQL_HANDLE_STMT, hstmt)
-			C.SQLFreeHandle(C.SQL_HANDLE_STMT, hstmt)
-			close(done)
-		}
-		done <- nil
-		close(done)
-	}()
+	// According to DB2 LUW manual, deferred prepare is on by default.
+	// The prepare request is not sent to the server until either
+	// SQLDescribeParam(), SQLExecute(), SQLNumResultCols(), SQLDescribeCol(), or
+	// SQLColAttribute() is called using the same statement handle as the prepared statement.
+	// That means SQLPrepareW should be quick and no need to cancel it.
+	// Also, search for SQL_ATTR_ASYNC_ENABLE to see the CLI functions that can be called asynchronously
+	// and can be cancelled using SQLCancel. SQLPrepareW is not one of them.
+	// Prepare the query.
+	ret = C.SQLPrepareW(C.SQLHSTMT(hstmt),
+		(*C.SQLWCHAR)(unsafe.Pointer(wsql)), C.SQL_NTS)
+	if !success(ret) {
+		C.SQLFreeHandle(C.SQL_HANDLE_STMT, hstmt)
+		return nil, formatError(C.SQL_HANDLE_STMT, hstmt)
+	}
 
 	select {
+	default:
 	case <-ctx.Done():
 		if hstmt != C.SQL_NULL_HSTMT {
 			C.SQLFreeHandle(C.SQL_HANDLE_STMT, hstmt)
 		}
 		return nil, ctx.Err()
-	case err := <-done:
-		if err != nil {
-			return nil, err
-		}
 	}
-
 	return &stmt{
 		conn:  c,
 		hstmt: hstmt,
@@ -157,10 +153,6 @@ func (c *conn) Begin() (driver.Tx, error) {
 }
 
 func (c *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
 	if c.tx {
 		panic("database/sql/driver: [asifjalil][CLI driver]: multiple Tx")
 	}
@@ -208,6 +200,12 @@ func (c *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 		return nil, err
 	}
 
+	select {
+	default:
+	case <-ctx.Done():
+		c.Close()
+		return nil, ctx.Err()
+	}
 	c.tx = true
 	return &tx{c}, nil
 }

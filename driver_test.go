@@ -324,14 +324,18 @@ func TestQueryContext(t *testing.T) {
 	}
 }
 
-func TestTxPrepareContext(t *testing.T) {
+func TestTxContext(t *testing.T) {
 	db, err := newTestDB()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.close()
 
-	tx, err := db.Begin()
+	opts := sql.TxOptions{
+		Isolation: sql.LevelDefault,
+		ReadOnly:  true,
+	}
+	tx, err := db.BeginTx(context.Background(), &opts)
 	if err != nil {
 		t.Fatal(err)
 	}
