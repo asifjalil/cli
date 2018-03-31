@@ -240,12 +240,12 @@ func TestRowsColumnTypes(t *testing.T) {
 		colIsVarLengths []bool
 		colScales       []int64
 	}{
-		{qry: `SELECT current timestamp, current date, current time, ' A  ', 100, 1.101, cast(NULL as INT)
+		{qry: `SELECT current timestamp, current date, current time, ' A  ', 100, 1.101, cast(NULL as INT), cast(NULL as DECFLOAT)
 		FROM sysibm.sysdummy1`,
-			colTypes:        []string{"TIMESTAMP", "DATE", "TIME", "VARCHAR", "INTEGER", "DECIMAL", "INTEGER"},
-			colNullables:    []bool{false, false, false, false, false, false, true},
-			colIsVarLengths: []bool{false, false, false, true, false, false, false},
-			colScales:       []int64{6, 0, 0, 0, 0, 3, 0},
+			colTypes:        []string{"TIMESTAMP", "DATE", "TIME", "VARCHAR", "INTEGER", "DECIMAL", "INTEGER", "DECFLOAT"},
+			colNullables:    []bool{false, false, false, false, false, false, true, true},
+			colIsVarLengths: []bool{false, false, false, true, false, false, false, false},
+			colScales:       []int64{6, 0, 0, 0, 0, 3, 0, 0},
 		},
 	}
 	db, err := newTestDB()
@@ -352,4 +352,121 @@ func TestTxContext(t *testing.T) {
 	rows.Close()
 	stmt.Close()
 	tx.Commit()
+}
+
+func TestNullString(t *testing.T) {
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	var s sql.NullString
+	err = db.QueryRow("VALUES (CAST (NULL AS VARCHAR(30)))").Scan(&s)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if s.Valid {
+		t.Fatalf("Expected null string, got %v\n", s)
+	}
+}
+
+func TestDecFloat(t *testing.T) {
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	var n sql.NullFloat64
+	decFloats := []float64{
+		1.999999,
+		0,
+		0.1,
+		-0.1,
+		-1.999999,
+	}
+	for i, df := range decFloats {
+		if i == 0 {
+			err = db.QueryRow("VALUES (CAST (NULL AS DECFLOAT))").Scan(&n)
+			if n.Valid {
+				t.Fatalf("Expected NULL, got %v\n", n)
+			}
+		}
+		err = db.QueryRow("VALUES (CAST (? AS DECFLOAT))", df).Scan(&n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if df != n.Float64 {
+			t.Fatalf("Wanted %v, got %v\n", df, n.Float64)
+		}
+	}
+}
+
+func TestVarBinary(t *testing.T) {
+	password := "Pac1f1c"
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	_, err = db.Exec("CREATE TABLE TEST(COL1 VARCHAR(50) FOR BIT DATA)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Exec("DROP TABLE TEST")
+	}()
+
+	testStrings := []string{
+		"Hello, 世界",
+		"289-46-8832",
+		"",
+	}
+	var myString string
+	for _, testString := range testStrings {
+		_, err = db.Exec("INSERT INTO TEST  VALUES ENCRYPT(?, ?)", testString, password)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		err = db.QueryRow("SELECT DECRYPT_CHAR(COL1, ?) FROM TEST", password).Scan(&myString)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Logf("%v => %v\n", myString, []byte(myString))
+		if myString != testString {
+			t.Fatalf("Expected %v, got %v\n", testString, myString)
+		}
+
+		_, err = db.Exec("DELETE FROM TEST")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// for issue #2
+// Empty character strings from the db get represented as a byte-slice with all 0s
+func TestEmptyString(t *testing.T) {
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	var emptyString string
+	err = db.QueryRow("SELECT '' FROM sysibm.sysdummy1").Scan(&emptyString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if emptyString != "" {
+		t.Fatalf("Expected '' got %v\n", emptyString)
+	}
+	if len([]byte(emptyString)) > 0 {
+		t.Fatalf("Expected empty byte slice but got %v\n", []byte(emptyString))
+	}
 }

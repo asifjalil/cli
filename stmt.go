@@ -191,7 +191,10 @@ func (s *stmt) bindParam(idx int, v driver.Value) error {
 		sqltype = C.SQL_BINARY
 		b := make([]byte, len(d))
 		copy(b, d)
-		buf = unsafe.Pointer(&b[0])
+		// handle empty binary field
+		if len(b) > 0 {
+			buf = unsafe.Pointer(&b[0])
+		}
 		buflen = C.SQLLEN(len(b))
 		plen = &buflen
 		size = C.SQLULEN(len(b))

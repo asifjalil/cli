@@ -12,8 +12,8 @@ import (
 )
 
 func Example() {
-	exampleOpen()
-	exampleLoad()
+	ExampleOpen()
+	ExampleLoad()
 
 	//Output:
 	//1.1
@@ -21,7 +21,7 @@ func Example() {
 	//World
 }
 
-func exampleOpen() {
+func ExampleOpen() {
 	var val float64
 
 	connStr := "SQLConnect; Database = Sample;" // trailing semi-colon is required
@@ -47,7 +47,7 @@ func exampleOpen() {
 	log.Printf("db.Close()")
 }
 
-func exampleLoad() {
+func ExampleLoad() {
 	tabname := "loadtable"
 	createStmt := fmt.Sprintf("CREATE TABLE %s (Col1 VARCHAR(30))", tabname)
 	dropStmt := fmt.Sprintf("DROP TABLE %s", tabname)

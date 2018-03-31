@@ -10,6 +10,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"reflect"
+	"strconv"
 	"time"
 	"unsafe"
 )
@@ -107,6 +108,8 @@ func (c *column) typeName() string {
 		return "VARBINARY"
 	case C.SQL_XML:
 		return "XML"
+	case C.SQL_DECFLOAT:
+		return "DECFLOAT"
 	default:
 		return "UNKNOWN"
 	}
@@ -140,6 +143,11 @@ func (c *column) scanType() reflect.Type {
 	case C.SQL_C_DOUBLE:
 		return reflect.TypeOf(float64(0.0))
 	case C.SQL_C_CHAR, C.SQL_C_WCHAR:
+		// default C type for DECFLOAT is CHAR
+		// That CHAR needs to be converted to float64
+		if c.sqltype == C.SQL_DECFLOAT {
+			return reflect.TypeOf(float64(0.0))
+		}
 		return reflect.TypeOf(string(""))
 	case C.SQL_C_TYPE_DATE, C.SQL_C_TYPE_TIME, C.SQL_C_TYPE_TIMESTAMP:
 		return reflect.TypeOf(time.Time{})
@@ -162,8 +170,6 @@ func (c *column) value() (driver.Value, error) {
 		if err != nil {
 			return nil, err
 		}
-	} else if c.len > 0 {
-		buf = buf[:c.len]
 	}
 
 	// c.len is set after calling SQLFetch
@@ -182,7 +188,13 @@ func (c *column) value() (driver.Value, error) {
 	case C.SQL_C_DOUBLE:
 		return *((*float64)(p)), nil
 	case C.SQL_C_CHAR:
-		return buf, nil
+		// handle DECFLOAT whose default C type is CHAR
+		if c.sqltype == C.SQL_DECFLOAT {
+			s := string(buf[:c.len])
+			f, err := strconv.ParseFloat(s, 64)
+			return f, err
+		}
+		return buf[:c.len], nil
 	case C.SQL_C_WCHAR:
 		if p == nil {
 			return nil, nil
@@ -217,7 +229,7 @@ func (c *column) value() (driver.Value, error) {
 			time.Local)
 		return r, nil
 	case C.SQL_C_BINARY:
-		return buf, nil
+		return buf[:c.len], nil
 	}
 	return nil, fmt.Errorf("database/sql/driver: [asifjalil][CLI Driver]: unsupported column ctype %d", c.ctype)
 }
@@ -280,7 +292,10 @@ func newColumn(h C.SQLHSTMT, idx int) (*column, error) {
 		var v sql_TIME_STRUCT
 		col.ctype = C.SQL_C_TYPE_TIME
 		col.data = make([]byte, int(unsafe.Sizeof(v)))
-	case C.SQL_CHAR, C.SQL_VARCHAR, C.SQL_CLOB:
+	case C.SQL_CHAR, C.SQL_VARCHAR, C.SQL_CLOB, C.SQL_DECFLOAT:
+		// According to _SQL symbolic and default data types for CLI applications_
+		// in DB2 IBM Knowledge Center, default C type for SQL_DECFLOAT is CHAR
+		// https://www.ibm.com/support/knowledgecenter/en/SSEPGG_11.1.0/com.ibm.db2.luw.apdv.cli.doc/doc/r0000526.html
 		l := int(size)
 		l += 1 // room for null-termination character
 		col.ctype = C.SQL_C_CHAR
