@@ -125,11 +125,23 @@ func (s *stmt) bindParam(idx int, v driver.Value) error {
 
 	switch d := v.(type) {
 	case nil:
+		var dataType, decimalDigits, nullable C.SQLSMALLINT
+		var parameterSize C.SQLULEN
 		var ind C.SQLLEN = C.SQL_NULL_DATA
-		ctype = C.SQL_WCHAR
-		sqltype = C.SQL_CHAR
+
+		// nil has no type, so use SQLDescribeParam to determine the
+		// parameter type.
+		ret := C.SQLDescribeParam(C.SQLHSTMT(s.hstmt), C.SQLUSMALLINT(idx+1),
+			&dataType, &parameterSize, &decimalDigits, &nullable)
+		if !success(ret) {
+			return formatError(C.SQL_HANDLE_STMT, s.hstmt)
+		}
+
+		ctype = C.SQL_C_DEFAULT
+		sqltype = dataType
 		buf = nil
-		size = 1
+		size = parameterSize
+		decimal = decimalDigits
 		buflen = 0
 		plen = &ind
 	case string:

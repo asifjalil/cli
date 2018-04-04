@@ -3,8 +3,11 @@ package cli_test
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -310,7 +313,7 @@ func TestQueryContext(t *testing.T) {
 		if _, sqlstate, ok := getDB2Error(err); ok {
 			switch {
 			case sqlstate == "42884":
-				t.Log("SLEEP function is missing. Skip the test.")
+				t.Skip("SLEEP function is missing. Skip the test.")
 			case sqlstate == "HY008":
 				t.Log("All Ok!")
 			default:
@@ -354,24 +357,6 @@ func TestTxContext(t *testing.T) {
 	tx.Commit()
 }
 
-func TestNullString(t *testing.T) {
-	db, err := newTestDB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.close()
-
-	var s sql.NullString
-	err = db.QueryRow("VALUES (CAST (NULL AS VARCHAR(30)))").Scan(&s)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if s.Valid {
-		t.Fatalf("Expected null string, got %v\n", s)
-	}
-}
-
 func TestDecFloat(t *testing.T) {
 	db, err := newTestDB()
 	if err != nil {
@@ -380,31 +365,53 @@ func TestDecFloat(t *testing.T) {
 	defer db.close()
 
 	var n sql.NullFloat64
-	decFloats := []float64{
-		1.999999,
-		0,
-		0.1,
-		-0.1,
-		-1.999999,
+	decFloats := []sql.NullFloat64{
+		{Float64: 0, Valid: false}, // null decfloat
+		{Float64: 0.0, Valid: true},
+		{Float64: 0.1, Valid: true},
+		{Float64: -0.1, Valid: true},
+		{Float64: 1.999999, Valid: true},
+		{Float64: -1.999999, Valid: true},
 	}
-	for i, df := range decFloats {
-		if i == 0 {
-			err = db.QueryRow("VALUES (CAST (NULL AS DECFLOAT))").Scan(&n)
-			if n.Valid {
-				t.Fatalf("Expected NULL, got %v\n", n)
-			}
-		}
+	for _, df := range decFloats {
 		err = db.QueryRow("VALUES (CAST (? AS DECFLOAT))", df).Scan(&n)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatal(err, ". For decfloat value: ", df)
 		}
-		if df != n.Float64 {
-			t.Fatalf("Wanted %v, got %v\n", df, n.Float64)
+		if !reflect.DeepEqual(df, n) {
+			t.Errorf("Wanted %v, got %v\n", df, n)
 		}
 	}
 }
 
-func TestVarBinary(t *testing.T) {
+func TestInt(t *testing.T) {
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	var n sql.NullInt64
+	ints := []sql.NullInt64{
+		{Int64: 0, Valid: false}, // null int
+		{Int64: 0, Valid: true},
+		{Int64: 1, Valid: true},
+		{Int64: -1, Valid: true},
+		{Int64: 999999, Valid: true},
+		{Int64: 999999, Valid: true},
+	}
+	for _, i := range ints {
+		err = db.QueryRow("VALUES (CAST (? AS INT))", i).Scan(&n)
+		if err != nil {
+			t.Fatal(err, ". For int value: ", i)
+		}
+		if !reflect.DeepEqual(i, n) {
+			t.Errorf("Wanted %v, got %v\n", i, n)
+		}
+	}
+}
+
+func TestString(t *testing.T) {
 	password := "Pac1f1c"
 	db, err := newTestDB()
 	if err != nil {
@@ -412,45 +419,39 @@ func TestVarBinary(t *testing.T) {
 	}
 	defer db.close()
 
-	_, err = db.Exec("CREATE TABLE TEST(COL1 VARCHAR(50) FOR BIT DATA)")
+	_, err = db.Exec("CREATE TABLE STRINGS(COL1 VARCHAR(50) FOR BIT DATA)")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
-		db.Exec("DROP TABLE TEST")
+		db.Exec("DROP TABLE STRINGS")
 	}()
 
-	testStrings := []string{
-		"Hello, 世界",
-		"289-46-8832",
-		"",
+	testStrings := []sql.NullString{
+		{String: "", Valid: false},              // null string
+		{String: "", Valid: true},               // empty string
+		{String: "Hello, 世界", Valid: true},      // unicode string
+		{String: "289-46-8832-AB", Valid: true}, // alphanumeric string
 	}
-	var myString string
+	var myString sql.NullString
 	for _, testString := range testStrings {
-		_, err = db.Exec("INSERT INTO TEST  VALUES ENCRYPT(?, ?)", testString, password)
+
+		err = db.QueryRow(`SELECT DECRYPT_CHAR(COL1, ?) FROM FINAL TABLE (
+			INSERT INTO STRINGS VALUES ENCRYPT(?, ?)
+		)`, password, testString, password).Scan(&myString)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		err = db.QueryRow("SELECT DECRYPT_CHAR(COL1, ?) FROM TEST", password).Scan(&myString)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		t.Logf("%v => %v\n", myString, []byte(myString))
-		if myString != testString {
-			t.Fatalf("Expected %v, got %v\n", testString, myString)
-		}
-
-		_, err = db.Exec("DELETE FROM TEST")
-		if err != nil {
-			t.Fatal(err)
+		t.Logf("%v => %v\n", testString, myString)
+		if !reflect.DeepEqual(testString, myString) {
+			t.Errorf("Expected %v, got %v\n", testString, myString)
 		}
 	}
 }
 
 // for issue #2
-// Empty character strings from the db get represented as a byte-slice with all 0s
+// Empty character strings from the db get represented as a byte-slice with all 0s.
 func TestEmptyString(t *testing.T) {
 	db, err := newTestDB()
 	if err != nil {
@@ -468,5 +469,71 @@ func TestEmptyString(t *testing.T) {
 	}
 	if len([]byte(emptyString)) > 0 {
 		t.Fatalf("Expected empty byte slice but got %v\n", []byte(emptyString))
+	}
+}
+
+type NullByte struct {
+	Byte  []byte
+	Valid bool
+}
+
+func (nb *NullByte) Scan(value interface{}) error {
+	if value == nil {
+		nb.Byte, nb.Valid = nil, false
+		return nil
+	}
+	nb.Valid = true
+	nb.Byte = value.([]byte)
+	return nil
+}
+
+func (nb NullByte) Value() (driver.Value, error) {
+	if !nb.Valid {
+		return nil, nil
+	}
+	return nb.Byte, nil
+}
+
+// for issue #2
+// Empty VarBinary causes panic.
+func TestVarBinary(t *testing.T) {
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	_, err = db.Exec(`CREATE TABLE binaries
+	( NAME varchar(64)
+	, PASSWORDHASH varbinary(255))`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Exec("DROP TABLE binaries")
+	}()
+
+	test := []NullByte{
+		{Byte: nil, Valid: false},                // nil varbinary
+		{Byte: []byte(""), Valid: true},          // empty varbinary
+		{Byte: []byte("myhint"), Valid: true},    // regular varbinary
+		{Byte: []byte("Hello, 世界"), Valid: true}, // unicode varbinary
+	}
+
+	var pwhash sql.NullString
+	for _, hint := range test {
+		err = db.QueryRow(`SELECT HEX(PASSWORDHASH) FROM FINAL TABLE
+	(INSERT INTO binaries (NAME, PASSWORDHASH) VALUES (?, ?))`, "ABCD", hint).Scan(&pwhash)
+		if err != nil {
+			t.Error(err)
+		}
+		decoded, err := hex.DecodeString(pwhash.String)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v => %v\n", hint.Byte, decoded)
+		if string(hint.Byte) != string(decoded) {
+			t.Errorf("Expected %s, got %s\n", hint.Byte, decoded)
+		}
 	}
 }
