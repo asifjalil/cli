@@ -295,7 +295,7 @@ func TestRowsColumnTypes(t *testing.T) {
 	}
 }
 
-func TestQueryContext(t *testing.T) {
+func TestQueryTimeout(t *testing.T) {
 	var rc int
 	db, err := newTestDB()
 	if err != nil {
@@ -306,19 +306,66 @@ func TestQueryContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err = db.QueryRowContext(ctx, "values SLEEP(60)").Scan(&rc)
+	// The test works if a separate connecton puts a exclusive lock on a table.
+	// For example: db2 +c "LOCK TABLE asif.ACT IN EXCLUSIVE MODE"
+	// Then count the number of rows.
+	// err = db.QueryRowContext(ctx, "select count(*) from asif.ACT").Scan(&rc)
+
+	// The test doesn't work with SLEEP C UDF.
+	// With the C udf SLEEP function DB2 CLI driver doesn't respond to SQLCancel.
+	// err = db.QueryRowContext(ctx, "VALUES(SLEEP(60))").Scan(&rc)
+	// Use a CPU intensive, naive SQL based sleep function instead.
+	err = db.QueryRowContext(ctx, "CALL SLEEP_PROC(60)").Scan(&rc)
 
 	switch {
 	case err != nil:
-		if _, sqlstate, ok := getDB2Error(err); ok {
+		if sqlcode, sqlstate, ok := getDB2Error(err); ok {
 			switch {
-			case sqlstate == "42884":
+			case sqlstate == "42884" || sqlcode == -1646:
 				t.Skip("SLEEP function is missing. Skip the test.")
 			case sqlstate == "HY008":
 				t.Log("All Ok!")
 			default:
 				t.Errorf("Unexpected CLI error: %s\n", err)
 			}
+		} else {
+			t.Errorf("Expected CLI error with SQLCode and SqlState; instead got this error: %s\n", err)
+		}
+	default:
+		t.Log("Expected the query to fail, but it didn't.")
+	}
+}
+
+func TestQueryCancel(t *testing.T) {
+	var rc int
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// use a goroutine to cancel the query in 5 seconds
+	go func(cancel context.CancelFunc) {
+		time.Sleep(5 * time.Second)
+		cancel()
+	}(cancel)
+
+	err = db.QueryRowContext(ctx, "CALL SLEEP_PROC(60)").Scan(&rc)
+	switch {
+	case err != nil:
+		if sqlcode, sqlstate, ok := getDB2Error(err); ok {
+			switch {
+			case sqlstate == "42884" || sqlcode == -1646:
+				t.Skip("SLEEP function is missing. Skip the test.")
+			case sqlstate == "HY008":
+				t.Log("Query was cancelled as expected.")
+			default:
+				t.Errorf("Unexpected CLI error: %s\n", err)
+			}
+		} else if err == context.Canceled {
+			// The goroutine may have cancelled the context before the query even started.
+			t.Log("Context was cancelled before the query even started. That's expected also.")
 		} else {
 			t.Errorf("Expected CLI error with SQLCode and SqlState; instead got this error: %s\n", err)
 		}

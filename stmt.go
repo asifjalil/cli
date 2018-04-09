@@ -231,52 +231,63 @@ func (s *stmt) sqlexec(ctx context.Context, args []driver.Value) error {
 		panic("database/sql/driver: [asifjalil][CLI Driver]: Query with active Rows")
 	}
 
-	// go1.8+
-	// check if the context has a deadline
-	if _, ok := ctx.Deadline(); ok {
-		/*
-			// Initially used the timeout seconds from the context
-			// as the timeout value for SQL_ATTR_QRY_TIMEOUT.
-			// But DB2 didn't terminate the statement on time as expected.
-			// As a result stmt.Close(...) function waited until the query is done
-			// before freeing the stmt handle.
-			timeout := deadline.Sub(time.Now())
-			timeoutSec := C.SQLINTEGER(timeout.Seconds())
-			fmt.Printf("timeout(sec): %t\n", timeoutSec)
+	// Check if the context has a deadline
+	// Update: a context can be cancelled and may not have deadline. Handle that.
+	// if _, ok := ctx.Deadline(); ok {
+	/*
+		// Initially used the timeout seconds from the context
+		// as the timeout value for SQL_ATTR_QRY_TIMEOUT.
+		// But DB2 didn't terminate the statement on time as expected.
+		// As a result stmt.Close(...) function waited until the query is done
+		// before freeing the stmt handle.
+		timeout := deadline.Sub(time.Now())
+		timeoutSec := C.SQLINTEGER(timeout.Seconds())
+		fmt.Printf("timeout(sec): %t\n", timeoutSec)
 
-			ret := C.SQLSetStmtAttr(C.SQLHSTMT(s.hstmt),
-				C.SQL_ATTR_QUERY_TIMEOUT,
-				C.SQLPOINTER(uintptr(timeoutSec)),
-				C.SQL_IS_UINTEGER)
-			if !success(ret) {
-				return formatError(C.SQL_HANDLE_STMT, s.hstmt)
-			}
-
-			var realTimeout C.SQLINTEGER
-			ret = C.SQLGetStmtAttr(C.SQLHSTMT(s.hstmt),
-				C.SQL_ATTR_QUERY_TIMEOUT,
-				C.SQLPOINTER(&realTimeout),
-				0, nil)
-
-			if !success(ret) {
-				return formatError(C.SQL_HANDLE_STMT, s.hstmt)
-			}
-
-			fmt.Printf("real timeout(sec): %t\n", realTimeout)
-		*/
-
-		// Enabling option to call SQLExecute asynchronously.
-		// This way, we can use SQLCancel to cancel the query when
-		// the context times out.
 		ret := C.SQLSetStmtAttr(C.SQLHSTMT(s.hstmt),
-			C.SQL_ATTR_ASYNC_ENABLE,
-			C.SQLPOINTER(uintptr(C.SQL_ASYNC_ENABLE_ON)),
-			0)
+			C.SQL_ATTR_QUERY_TIMEOUT,
+			C.SQLPOINTER(uintptr(timeoutSec)),
+			C.SQL_IS_UINTEGER)
+		if !success(ret) {
+			return formatError(C.SQL_HANDLE_STMT, s.hstmt)
+		}
+
+		var realTimeout C.SQLINTEGER
+		ret = C.SQLGetStmtAttr(C.SQLHSTMT(s.hstmt),
+			C.SQL_ATTR_QUERY_TIMEOUT,
+			C.SQLPOINTER(&realTimeout),
+			0, nil)
 
 		if !success(ret) {
 			return formatError(C.SQL_HANDLE_STMT, s.hstmt)
 		}
-	}
+
+		fmt.Printf("real timeout(sec): %t\n", realTimeout)
+	*/
+
+	// Enabling option to call SQLExecute asynchronously.
+	// This way, we can use SQLCancel to cancel the query when
+	// the context times out.
+	// Update: It seems that there is no need to enable ASYNC to use SQLCancel.
+	// According to
+	// https://www.ibm.com/support/knowledgecenter/en/SSEPGG_11.1.0/com.ibm.db2.luw.apdv.cli.doc/doc/r0000567.html
+	// *Canceling functions in multithread applications*
+	// In a multithread application, the application can cancel a function that is running synchronously on a statement.
+	// To cancel the function, the application calls SQLCancel() with the same statement handle as that used by the target
+	// function, but on a different thread. How the function is canceled depends upon the operating system.
+	// The return code of the SQLCancel() call indicates only whether CLI processed the request successfully.
+	// Only SQL_SUCCESS or SQL_ERROR can be returned; no SQLSTATEs are returned.
+	// If the original function is canceled, it returns SQL_ERROR and SQLSTATE HY008 (Operation was Canceled.).
+	/*
+		ret := C.SQLSetStmtAttr(C.SQLHSTMT(s.hstmt),
+			C.SQL_ATTR_ASYNC_ENABLE,
+			C.SQLPOINTER(uintptr(C.SQL_ASYNC_ENABLE_ON)),
+			0)
+		if !success(ret) {
+			return formatError(C.SQL_HANDLE_STMT, s.hstmt)
+		}
+	*/
+	// }
 
 	// bind values to parameters
 	for i, a := range args {
@@ -286,27 +297,16 @@ func (s *stmt) sqlexec(ctx context.Context, args []driver.Value) error {
 		}
 	}
 
-	// execute the statement
+	// execute the statement in a separate go routine. That way if the context is cancelled
+	// or the context deadline/timeout reached, we can call SQLCancel in the main thread.
 	qry := make(chan C.SQLRETURN)
 	go func() {
 		var ret C.SQLRETURN
-		if _, ok := ctx.Deadline(); ok {
-			// When the context has a deadline, the stmt handle
-			// will run the query asynchronously. Use a for loop to wait for it.
-			for {
-				ret = C.SQLExecute(C.SQLHSTMT(s.hstmt))
-				if ret != C.SQL_STILL_EXECUTING {
-					break
-				}
-			}
-		} else {
-			ret = C.SQLExecute(C.SQLHSTMT(s.hstmt))
-		}
+		ret = C.SQLExecute(C.SQLHSTMT(s.hstmt))
 		qry <- ret
 		close(qry)
 	}()
 
-	// go1.8+ feature: using Context
 	select {
 	case <-ctx.Done():
 		ret := C.SQLCancel(C.SQLHSTMT(s.hstmt))
@@ -319,14 +319,13 @@ func (s *stmt) sqlexec(ctx context.Context, args []driver.Value) error {
 			sqlstate: "HY008",
 			message:  errStr + ": SQL Operation was cancelled."}
 	case ret := <-qry:
-		if ret == C.SQL_NO_DATA_FOUND {
-			// may this is a searched UPDATE/DELETE and no row satisfied the search condition
-		}
+		// if ret == C.SQL_NO_DATA_FOUND {
+		// may this is a searched UPDATE/DELETE and no row satisfied the search condition
+		// }
 		if !success(ret) {
 			return formatError(C.SQL_HANDLE_STMT, s.hstmt)
 		}
 	}
-
 	return nil
 }
 
