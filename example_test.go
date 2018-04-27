@@ -47,6 +47,27 @@ func ExampleOpen() {
 	log.Printf("db.Close()")
 }
 
+func ExampleCurrentSchema() {
+	connStr := "DSN = sample; CurrentSchema = SYSIBM"
+	qry := "Select 100 from systables fetch first 1 row only"
+
+	log.Println(strings.Repeat("#", 30))
+	log.Println("Shows how to set current schema in the connection string")
+
+	log.Printf("sql.Open(\"cli\",\"%s\")\n", connStr)
+	db, err := sql.Open("cli", connStr)
+	checkError(err)
+	defer db.Close()
+
+	var val int
+	err = db.QueryRow(qry).Scan(&val)
+	checkError(err)
+
+	log.Printf("Expecting 100, got %v\n", val)
+	fmt.Println(val)
+	// Output: 100
+}
+
 func ExampleLoad() {
 	tabname := "loadtable"
 	createStmt := fmt.Sprintf("CREATE TABLE %s (Col1 VARCHAR(30))", tabname)
