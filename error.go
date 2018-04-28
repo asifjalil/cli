@@ -1,8 +1,6 @@
 package cli
 
 /*
-#cgo LDFLAGS: -ldb2
-
 #include <sqlcli1.h>
 */
 import "C"

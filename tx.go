@@ -1,5 +1,10 @@
 package cli
 
+/*
+#include <sqlcli1.h>
+*/
+import "C"
+
 type tx struct {
 	c *conn
 }
