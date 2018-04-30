@@ -1,19 +1,26 @@
 
 
-# Package cli
-`import _ "github.com/asifjalil/cli"`
+# cli
+`import "github.com/asifjalil/cli"`
 
 * [Overview](#pkg-overview)
 * [Index](#pkg-index)
 * [Examples](#pkg-examples)
 
 ## <a name="pkg-overview">Overview</a>
-Package **cli** provides access to a **DB2 database** on Linux, Unix, and Windows (LUW)
-using DB2 Call Level Interface (**CLI**) API.
+Package **cli** provides access to a **DB2 database** using DB2 Call Level Interface (**CLI**) API.
+This requires **cgo** and DB2 _cli/odbc_ driver **libdb2.so**.  It is not possible to use this driver to create a statically linked Go package because
+IBM doesn't provide the DB2 _cli/odbc_ driver as _libdb2.a_ static library.
+On **Windows**, DB2 _cli/odbc_ library is not compatiable with **gcc**, but **cgo** requires **gcc**. Hence, this driver is not
+supported on Windows.
+
 **cli** is based on *alexbrainman's* odbc package: <a href="https://github.com/alexbrainman/odbc">https://github.com/alexbrainman/odbc</a>.
 
 This package registers a driver for the standard Go **database/sql** package and used through the
 **database/sql** API.
+
+
+	import _ "github.com/asifjalil/cli"
 
 ###Error Handling
 The package has no exported API except two functions-**SQLCode()** and **SQLState()**-for inspecting
@@ -102,7 +109,7 @@ but not a DB2 database manager.
 To install, download this package by running the following:
 
 
-	go get -d github.com/asifjalil/cli
+	got get -d github.com/asifjalil/cli
 
 Go to the following directory:
 
@@ -134,7 +141,7 @@ See `example_test.go`.
 * [Package](#example_)
 
 #### <a name="pkg-files">Package files</a>
-[column.go](/src/target/column.go) [conn.go](/src/target/conn.go) [driver.go](/src/target/driver.go) [error.go](/src/target/error.go) [stmt.go](/src/target/stmt.go) [strutil.go](/src/target/strutil.go) [tx.go](/src/target/tx.go) 
+[column.go](/src/github.com/asifjalil/cli/column.go) [conn.go](/src/github.com/asifjalil/cli/conn.go) [driver.go](/src/github.com/asifjalil/cli/driver.go) [error.go](/src/github.com/asifjalil/cli/error.go) [stmt.go](/src/github.com/asifjalil/cli/stmt.go) [strutil.go](/src/github.com/asifjalil/cli/strutil.go) [tx.go](/src/github.com/asifjalil/cli/tx.go) 
 
 
 

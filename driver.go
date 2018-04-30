@@ -1,5 +1,9 @@
-// Package **cli** provides access to a **DB2 database** on Linux, Unix, and Windows (LUW)
-// using DB2 Call Level Interface (**CLI**) API.
+// Package **cli** provides access to a **DB2 database** using DB2 Call Level Interface (**CLI**) API.
+// This requires **cgo** and DB2 _cli/odbc_ driver **libdb2.so**.  It is not possible to use this driver to create a statically linked Go package because
+// IBM doesn't provide the DB2 _cli/odbc_ driver as _libdb2.a_ static library.
+// On **Windows**, DB2 _cli/odbc_ library is not compatiable with **gcc**, but **cgo** requires **gcc**. Hence, this driver is not
+// supported on Windows.
+//
 // **cli** is based on *alexbrainman's* odbc package: https://github.com/alexbrainman/odbc.
 //
 // This package registers a driver for the standard Go **database/sql** package and used through the
