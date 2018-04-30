@@ -87,11 +87,7 @@
 //	$GOPATH/src/github.com/asifjalil/cli
 // In that directory run the following to install the package:
 //	./install.sh
-// This script only works on Mac OS and Linux. For Windows, please
-// set the CGO_LDFLAGS and CGO_CFLAGS, so cgo can locate the DB2 CLI
-// library and CLI C header files.
-// Then run:
-//	go install
+// This script and this driver only works on Mac OS and Linux.
 //
 // ##Usage
 // See `example_test.go`.
