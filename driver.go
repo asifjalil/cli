@@ -11,7 +11,7 @@
 //
 //	import _ "github.com/asifjalil/cli"
 //
-// ###Error Handling
+// ### Error Handling
 // The package has no exported API except two functions-**SQLCode()** and **SQLState()**-for inspecting
 // DB2 CLI error. The function signature is as follows:
 //	func (e *cliError) SQLCode() int
@@ -47,7 +47,7 @@
 // SQLSTATE follows this format: ccsss, where cc indicates class and sss indicates subclass.
 // Search "SQLSTATE Messages" in DB2 Information Center for more detail.
 //
-// ###Connection String
+// ### Connection String
 // This driver uses DB2 CLI function **SQLConnect** and **SQLDriverConnect** in driver.Open(...).
 // To use **SQLConnect**, start the name or the DSN string with keyword sqlconnect. This keyword is case insensitive.
 // The connection string needs to follow this syntax to be valid:
@@ -82,14 +82,14 @@
 // but not a DB2 database manager.
 //
 // To install, download this package by running the following:
-//	got get -d github.com/asifjalil/cli
+//	go get -d github.com/asifjalil/cli
 // Go to the following directory:
 //	$GOPATH/src/github.com/asifjalil/cli
 // In that directory run the following to install the package:
 //	./install.sh
 // This script and this driver only works on Mac OS and Linux.
 //
-// ##Usage
+// ## Usage
 // See `example_test.go`.
 package cli
 
