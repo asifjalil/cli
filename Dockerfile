@@ -1,4 +1,4 @@
-ROM ubuntu:18.04 AS build
+FROM ubuntu:18.04 AS build
 
 # disable interactive functions
 ENV DEBIAN_FRONTEND noninteractive
