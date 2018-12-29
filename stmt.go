@@ -6,6 +6,7 @@ package cli
 import "C"
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"errors"
 	"fmt"
@@ -22,14 +23,15 @@ type stmt struct {
 	closed bool
 	rows   bool
 	cols   []*column
+	outs   []*out
 }
 
 func (s *stmt) Close() error {
 	if s.rows {
-		panic("database/sql/driver: [asifjalil][CLI Driver]: stmt Close with active Rows")
+		return errors.New("database/sql/driver: [asifjalil][CLI Driver]: stmt Close with active Rows")
 	}
 	if s.closed {
-		panic("database/sql/driver: [asifjalil][CLI Driver]: double Close of Stmt")
+		return errors.New("database/sql/driver: [asifjalil][CLI Driver]: double Close of Stmt")
 	}
 	s.closed = true
 	ret := C.SQLFreeHandle(C.SQL_HANDLE_STMT, s.hstmt)
@@ -37,13 +39,16 @@ func (s *stmt) Close() error {
 		return formatError(C.SQL_HANDLE_STMT, s.hstmt)
 	}
 
+	s.cols = nil
+	s.outs = nil
+
 	return nil
 }
 
 func (s *stmt) NumInput() int {
 	var paramCount C.SQLSMALLINT
 	if s.closed {
-		panic("database/sql/driver:[asifjalil][CLI Driver]: NumInput after Close")
+		return -1
 	}
 	ret := C.SQLNumParams(C.SQLHSTMT(s.hstmt), &paramCount)
 	if !success(ret) {
@@ -65,6 +70,17 @@ func (s *stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (drive
 	}
 
 	return s.exec(ctx, dargs)
+}
+
+// CheckNamedValue implementes driver.NamedValueChecker.
+func (s *stmt) CheckNamedValue(nv *driver.NamedValue) (err error) {
+	switch nv.Value.(type) {
+	case sql.Out:
+		err = nil
+	default:
+		nv.Value, err = driver.DefaultParameterConverter.ConvertValue(nv.Value)
+	}
+	return err
 }
 
 // exec is created to handle both Exec(...) and ExecContext(...)
@@ -120,6 +136,7 @@ func (s *stmt) bindParam(idx int, v driver.Value) error {
 	var buflen C.SQLLEN
 	var plen *C.SQLLEN
 	var buf unsafe.Pointer
+	var inputOutputType C.SQLSMALLINT = C.SQL_PARAM_INPUT
 
 	switch d := v.(type) {
 	case nil:
@@ -208,11 +225,38 @@ func (s *stmt) bindParam(idx int, v driver.Value) error {
 		buflen = C.SQLLEN(len(b))
 		plen = &buflen
 		size = C.SQLULEN(len(b))
+	case sql.Out:
+		var dataType, decimalDigits, nullable C.SQLSMALLINT
+		var parameterSize C.SQLULEN
+		ret := C.SQLDescribeParam(C.SQLHSTMT(s.hstmt), C.SQLUSMALLINT(idx+1),
+			&dataType, &parameterSize, &decimalDigits, &nullable)
+		if !success(ret) {
+			return formatError(C.SQL_HANDLE_STMT, s.hstmt)
+		}
+		sqltype = dataType
+		ctype = sqlTypeToCType(sqltype)
+		size = parameterSize
+		decimal = decimalDigits
+		inputOutputType = C.SQL_PARAM_OUTPUT
+		b := make([]byte, parameterSize)
+		if len(b) > 0 {
+			buf = unsafe.Pointer(&b[0])
+		}
+		buflen = C.SQLLEN(len(b))
+		plen = &buflen
+		s.outs = append(s.outs, &out{
+			sqlOut:  &d,
+			idx:     idx + 1,
+			data:    b,
+			ctype:   ctype,
+			sqltype: sqltype,
+			len:     buflen,
+		})
 	default:
-		panic(fmt.Errorf("database/sql/driver: [asifjalil][CLI Driver]: unsupported parameter type %T", v))
+		return fmt.Errorf("database/sql/driver: [asifjalil][CLI Driver]: unsupported bind param. type %T at position %d", v, idx+1)
 	}
 	ret := C.SQLBindParameter(C.SQLHSTMT(s.hstmt), C.SQLUSMALLINT(idx+1),
-		C.SQL_PARAM_INPUT, ctype, sqltype, size, decimal,
+		inputOutputType, ctype, sqltype, size, decimal,
 		C.SQLPOINTER(buf), buflen, plen)
 	if !success(ret) {
 		return formatError(C.SQL_HANDLE_STMT, s.hstmt)
@@ -223,10 +267,10 @@ func (s *stmt) bindParam(idx int, v driver.Value) error {
 // sqlexec executes any prepared statement
 func (s *stmt) sqlexec(ctx context.Context, args []driver.Value) error {
 	if s.closed {
-		panic("database/sql/driver: [asifjalil][CLI Driver]: Query after stmt Close")
+		return errors.New("database/sql/driver: [asifjalil][CLI Driver]: Query after stmt Close")
 	}
 	if s.rows {
-		panic("database/sql/driver: [asifjalil][CLI Driver]: Query with active Rows")
+		return errors.New("database/sql/driver: [asifjalil][CLI Driver]: new Query but the stmt has active Rows")
 	}
 
 	// Check if the context has a deadline
@@ -323,6 +367,11 @@ func (s *stmt) sqlexec(ctx context.Context, args []driver.Value) error {
 		if !success(ret) {
 			return formatError(C.SQL_HANDLE_STMT, s.hstmt)
 		}
+		for _, o := range s.outs {
+			if err := o.convertAssign(); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -401,7 +450,7 @@ func (r *rows) Close() error {
 
 func (r *rows) Next(dest []driver.Value) error {
 	if r.s == nil {
-		panic("database/sql/driver: [asifjalil][CLI Driver]: Next on closed Rows")
+		return errors.New("database/sql/driver: [asifjalil][CLI Driver]: Next on closed Rows")
 	}
 	ret := C.SQLFetch(C.SQLHSTMT(r.s.hstmt))
 	if ret == C.SQL_NO_DATA {

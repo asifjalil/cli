@@ -75,7 +75,7 @@ func (d *impl) Open(dsn string) (driver.Conn, error) {
 
 func (c *conn) Close() error {
 	if c.closed {
-		panic("database/sql/driver: [asifjalil][CLI Driver]: multiple connection Close")
+		return errors.New("database/sql/driver: [asifjalil][CLI Driver]: Called close on already closed connection")
 	}
 
 	c.closed = true
@@ -106,7 +106,7 @@ func (c *conn) PrepareContext(ctx context.Context, sql string) (driver.Stmt, err
 	var hstmt C.SQLHANDLE = C.SQL_NULL_HSTMT // stmt handle
 
 	if c.closed {
-		panic("database/sql/driver: [asifjalil][CLI Driver]: Prepare after conn Close")
+		return nil, errors.New("database/sql/driver: [asifjalil][CLI Driver]: called Prepare but the conn is closed")
 	}
 
 	// allocates a stmt handle to hstmt
@@ -152,7 +152,7 @@ func (c *conn) Begin() (driver.Tx, error) {
 
 func (c *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	if c.tx {
-		panic("database/sql/driver: [asifjalil][CLI driver]: multiple Tx")
+		return nil, errors.New("database/sql/driver: [asifjalil][CLI driver]: called BeginTx on already active transaction")
 	}
 
 	// turn off autocommit

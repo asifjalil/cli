@@ -1,12 +1,14 @@
 package cli_test
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	_ "github.com/asifjalil/cli"
 )
@@ -14,6 +16,8 @@ import (
 func Example() {
 	ExampleOpen()
 	ExampleLoad()
+	// Skip ExampleProc because the output is not always the same.
+	ExampleProc()
 
 	//Output:
 	//1.1
@@ -66,6 +70,30 @@ func ExampleCurrentSchema() {
 	log.Printf("Expecting 100, got %v\n", val)
 	fmt.Println(val)
 	// Output: 100
+}
+
+func ExampleProc() {
+	connStr := "DSN = sample"
+	var (
+		snapTime   time.Time
+		dbsize     int64
+		dbcapacity int64
+	)
+
+	procStmt := "call sysproc.get_dbsize_info(?, ?, ?, 0)"
+	db, err := sql.Open("cli", connStr)
+	checkError(err)
+	defer db.Close()
+	log.Println(strings.Repeat("#", 30))
+	log.Println("Shows how to use a stored procedure with OUTPUT parameters")
+	log.Printf("Running %q\n", procStmt)
+	_, err = db.ExecContext(context.Background(), procStmt,
+		sql.Out{Dest: &snapTime},
+		sql.Out{Dest: &dbsize},
+		sql.Out{Dest: &dbcapacity})
+	checkError(err)
+	log.Printf("snapshot time: %v, dbsize: %d, dbcapacity: %d\n", snapTime, dbsize, dbcapacity)
+	log.Println("success ...")
 }
 
 func ExampleLoad() {

@@ -4,6 +4,7 @@ package cli
 #include <sqlcli1.h>
 */
 import "C"
+import "errors"
 
 type tx struct {
 	c *conn
@@ -11,7 +12,7 @@ type tx struct {
 
 func (t *tx) Commit() error {
 	if t.c == nil {
-		panic("database/sql/driver: [asifjalil][CLI Driver]: extra Commit")
+		return errors.New("database/sql/driver: [asifjalil][CLI Driver]: extra Commit")
 	}
 	err := t.c.endTx(true)
 	t.c = nil
@@ -21,7 +22,7 @@ func (t *tx) Commit() error {
 
 func (t *tx) Rollback() error {
 	if t.c == nil {
-		panic("database/sql/driver: [asifjalil][CLI Driver]: extra Rollback")
+		return errors.New("database/sql/driver: [asifjalil][CLI Driver]: extra Rollback")
 	}
 	err := t.c.endTx(false)
 	t.c = nil
