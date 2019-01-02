@@ -160,20 +160,20 @@ func (s *stmt) bindParam(idx int, v driver.Value) error {
 		buflen = 0
 		plen = &ind
 	case string:
+		var ind C.SQLLEN = C.SQL_NTS
 		ctype = C.SQL_C_WCHAR
 		sqltype = C.SQL_WCHAR
 		b := stringToUTF16(d)
 		buf = unsafe.Pointer(&b[0])
 		l := len(b)
-		l -= 1 //remove terminating 0
-		colSize := C.SQLULEN(l)
-		if colSize < 1 {
+		if l == 0 {
 			// size cannot be less than 1 even for empty field
-			colSize = 1
+			l = 1
 		}
 		l *= 2 // every char takes 2 bytes
 		buflen = C.SQLLEN(l)
-		plen = &buflen
+		// use SQL_NTS to indicate that the string is null terminated
+		plen = &ind
 	case int64:
 		ctype = C.SQL_C_SBIGINT
 		sqltype = C.SQL_BIGINT
@@ -226,34 +226,24 @@ func (s *stmt) bindParam(idx int, v driver.Value) error {
 		plen = &buflen
 		size = C.SQLULEN(len(b))
 	case sql.Out:
-		var dataType, decimalDigits, nullable C.SQLSMALLINT
-		var parameterSize C.SQLULEN
-		ret := C.SQLDescribeParam(C.SQLHSTMT(s.hstmt), C.SQLUSMALLINT(idx+1),
-			&dataType, &parameterSize, &decimalDigits, &nullable)
-		if !success(ret) {
-			return formatError(C.SQL_HANDLE_STMT, s.hstmt)
+		o, err := newOut(s.hstmt, &d, idx)
+		if err != nil {
+			return err
 		}
-		sqltype = dataType
-		ctype = sqlTypeToCType(sqltype)
-		size = parameterSize
-		decimal = decimalDigits
-		inputOutputType = C.SQL_PARAM_OUTPUT
-		b := make([]byte, parameterSize)
+		sqltype = o.sqltype
+		ctype = o.ctype
+		size = o.parameterSize
+		decimal = o.decimalDigits
+		inputOutputType = o.inputOutputType
+		b := o.data
 		if len(b) > 0 {
 			buf = unsafe.Pointer(&b[0])
 		}
-		buflen = C.SQLLEN(len(b))
-		plen = &buflen
-		s.outs = append(s.outs, &out{
-			sqlOut:  &d,
-			idx:     idx + 1,
-			data:    b,
-			ctype:   ctype,
-			sqltype: sqltype,
-			len:     buflen,
-		})
+		buflen = o.buflen
+		plen = o.plen
+		s.outs = append(s.outs, o)
 	default:
-		return fmt.Errorf("database/sql/driver: [asifjalil][CLI Driver]: unsupported bind param. type %T at position %d", v, idx+1)
+		return fmt.Errorf("database/sql/driver: [asifjalil][CLI Driver]: unsupported bind param. type %T at index %d", v, idx+1)
 	}
 	ret := C.SQLBindParameter(C.SQLHSTMT(s.hstmt), C.SQLUSMALLINT(idx+1),
 		inputOutputType, ctype, sqltype, size, decimal,

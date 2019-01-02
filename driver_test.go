@@ -584,3 +584,225 @@ func TestVarBinary(t *testing.T) {
 		}
 	}
 }
+
+func TestSPOut(t *testing.T) {
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	_, err = db.Exec(`
+	 CREATE PROCEDURE doubleSum(IN p_a int
+		, IN p_b int
+		, OUT p_r int)
+	LANGUAGE SQL
+	SPECIFIC doublesum
+	BEGIN
+		SET p_r = 2 *(p_a + p_b);
+	END
+	 `)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Exec("DROP PROCEDURE doubleSum")
+	}()
+
+	var result int
+	procStmt := "CALL doublesum(2, 2, ?)"
+	_, err = db.ExecContext(context.Background(), procStmt,
+		sql.Out{Dest: &result})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != 8 {
+		t.Errorf("Expected 8, got %d\n", result)
+	}
+	t.Logf("%s returned %d\n", procStmt, result)
+}
+
+func TestSPClobOut(t *testing.T) {
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	_, err = db.Exec(`
+	 CREATE PROCEDURE out_param_clob(IN empno char(6)
+		, IN resume_format varchar(10)
+		, OUT resume clob)
+	LANGUAGE SQL
+	SPECIFIC out_param_clob
+	BEGIN
+		select resume into resume from emp_resume
+		where empno = empno and resume_format = resume_format
+		fetch first 1 row only;
+	END
+	 `)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Exec("DROP PROCEDURE out_param_clob")
+	}()
+
+	var resume string
+	procStmt := "CALL out_param_clob('000140', 'ascii', ?)"
+	_, err = db.ExecContext(context.Background(), procStmt,
+		sql.Out{Dest: &resume})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%s returned %s\n", procStmt, resume)
+}
+
+func TestSPInOut(t *testing.T) {
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	ts := time.Date(2009, time.November, 10, 23, 6, 29, 10011001000, time.UTC)
+	createSp := `CREATE PROCEDURE test_inout(
+		INOUT p_a %s)
+	LANGUAGE SQL
+	SPECIFIC test_inout
+	BEGIN
+		SET p_a = p_a ;
+	END
+	 `
+	callSp := "call test_inout(?)"
+	dropSp := "drop procedure test_inout"
+	testCases := []struct {
+		paramType string
+		want      sql.Out
+		got       sql.Out
+	}{
+		{
+			paramType: "int",
+			want:      sql.Out{Dest: &sql.NullInt64{Valid: false}, In: true},
+			got:       sql.Out{Dest: &sql.NullInt64{Valid: false}, In: true},
+		},
+		{
+			paramType: "int",
+			want:      sql.Out{Dest: &sql.NullInt64{Int64: -2147483648, Valid: true}, In: true},
+			got:       sql.Out{Dest: &sql.NullInt64{Int64: -2147483648, Valid: true}, In: true},
+		},
+		{
+			paramType: "int",
+			want:      sql.Out{Dest: &sql.NullInt64{Int64: 2147483647, Valid: true}, In: true},
+			got:       sql.Out{Dest: &sql.NullInt64{Int64: 2147483647, Valid: true}, In: true},
+		},
+		{
+			paramType: "bigint",
+			want:      sql.Out{Dest: &sql.NullInt64{Int64: -9223372036854775808, Valid: true}, In: true},
+			got:       sql.Out{Dest: &sql.NullInt64{Int64: -9223372036854775808, Valid: true}, In: true},
+		},
+		{
+			paramType: "bigint",
+			want:      sql.Out{Dest: &sql.NullInt64{Int64: 9223372036854775807, Valid: true}, In: true},
+			got:       sql.Out{Dest: &sql.NullInt64{Int64: 9223372036854775807, Valid: true}, In: true},
+		},
+		{
+			paramType: "varchar(15)",
+			want:      sql.Out{Dest: &sql.NullString{Valid: false}, In: true},
+			got:       sql.Out{Dest: &sql.NullString{Valid: false}, In: true},
+		},
+
+		{
+			paramType: "varchar(15)",
+			want:      sql.Out{Dest: &sql.NullString{String: "", Valid: true}, In: true},
+			got:       sql.Out{Dest: &sql.NullString{String: "", Valid: true}, In: true},
+		},
+		{
+			paramType: "varchar(20)",
+			want:      sql.Out{Dest: &sql.NullString{String: "Hello World", Valid: true}, In: true},
+			got:       sql.Out{Dest: &sql.NullString{String: "Hello World", Valid: true}, In: true},
+		},
+		{
+			paramType: "double",
+			want:      sql.Out{Dest: &sql.NullFloat64{Valid: false}, In: true},
+			got:       sql.Out{Dest: &sql.NullFloat64{Valid: false}, In: true},
+		},
+
+		{
+			paramType: "double",
+			want:      sql.Out{Dest: &sql.NullFloat64{Float64: 1.999999, Valid: true}, In: true},
+			got:       sql.Out{Dest: &sql.NullFloat64{Float64: 1.999999, Valid: true}, In: true},
+		},
+		{
+			paramType: "double",
+			want:      sql.Out{Dest: &sql.NullFloat64{Float64: -1.999999, Valid: true}, In: true},
+			got:       sql.Out{Dest: &sql.NullFloat64{Float64: -1.999999, Valid: true}, In: true},
+		},
+		{
+			paramType: "decfloat",
+			want:      sql.Out{Dest: &sql.NullFloat64{Valid: false}, In: true},
+			got:       sql.Out{Dest: &sql.NullFloat64{Valid: false}, In: true},
+		},
+		{
+			paramType: "decfloat",
+			want:      sql.Out{Dest: &sql.NullFloat64{Float64: 1.999999, Valid: true}, In: true},
+			got:       sql.Out{Dest: &sql.NullFloat64{Float64: 1.999999, Valid: true}, In: true},
+		},
+		{
+			paramType: "decfloat",
+			want:      sql.Out{Dest: &sql.NullFloat64{Float64: -1.999999, Valid: true}, In: true},
+			got:       sql.Out{Dest: &sql.NullFloat64{Float64: -1.999999, Valid: true}, In: true},
+		},
+		{
+			paramType: "varbinary(255)",
+			want:      sql.Out{Dest: &NullByte{Byte: nil, Valid: false}, In: true},
+			got:       sql.Out{Dest: &NullByte{Byte: nil, Valid: false}, In: true},
+		},
+		{
+			paramType: "varbinary(255)",
+			want:      sql.Out{Dest: &NullByte{Byte: []byte(""), Valid: true}, In: true},
+			got:       sql.Out{Dest: &NullByte{Byte: []byte(""), Valid: true}, In: true},
+		},
+		{
+			paramType: "varbinary(255)",
+			want:      sql.Out{Dest: &NullByte{Byte: []byte("myhint"), Valid: true}, In: true},
+			got:       sql.Out{Dest: &NullByte{Byte: []byte("myhint"), Valid: true}, In: true},
+		},
+		{
+			paramType: "varbinary(255)",
+			want:      sql.Out{Dest: &NullByte{Byte: []byte("Hello, 世界"), Valid: true}, In: true},
+			got:       sql.Out{Dest: &NullByte{Byte: []byte("Hello, 世界"), Valid: true}, In: true},
+		},
+		{
+			paramType: "timestamp",
+			want:      sql.Out{Dest: &ts, In: true},
+			got:       sql.Out{Dest: &ts, In: true},
+		},
+	}
+
+	for i, tc := range testCases {
+		// create the SP
+		_, err = db.Exec(fmt.Sprintf(createSp, tc.paramType))
+		if err != nil {
+			t.Fatalf("testcase #%d failed because %v\n", i, err)
+		}
+
+		// call the SP
+		_, err = db.Exec(callSp, tc.got)
+		if err != nil {
+			t.Fatalf("testcase #%d failed because %v\n", i, err)
+		}
+
+		// drop the SP
+		_, err = db.Exec(dropSp)
+		if err != nil {
+			t.Fatalf("Failed to run %v because %v", dropSp, err)
+		}
+
+		if !reflect.DeepEqual(tc.want, tc.got) {
+			t.Errorf("testcase #%d: Want %v: Got %v\n", i, tc.want, tc.got)
+		} else {
+			t.Logf("testcase #%d: paramType: %v: Got %v\n", i, tc.paramType, tc.got.Dest)
+		}
+	}
+}
