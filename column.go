@@ -183,17 +183,17 @@ func (c *column) value() (driver.Value, error) {
 		return *((*int32)(p)), nil
 	case C.SQL_C_SBIGINT:
 		return *((*int64)(p)), nil
-	case C.SQL_C_DOUBLE:
+	case C.SQL_C_DOUBLE, C.SQL_C_FLOAT:
 		return *((*float64)(p)), nil
 	case C.SQL_C_CHAR:
 		// handle DECFLOAT whose default C type is CHAR
-		if c.sqltype == C.SQL_DECFLOAT {
+		if c.sqltype == C.SQL_DECFLOAT || c.sqltype == C.SQL_DECIMAL || c.sqltype == C.SQL_NUMERIC {
 			s := string(buf[:c.len])
 			f, err := strconv.ParseFloat(s, 64)
 			return f, err
 		}
 		return buf[:c.len], nil
-	case C.SQL_C_WCHAR:
+	case C.SQL_C_WCHAR, C.SQL_C_DBCHAR:
 		if p == nil {
 			return nil, nil
 		}

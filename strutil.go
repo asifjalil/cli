@@ -3,6 +3,7 @@ package cli
 import (
 	"unicode/utf16"
 	"unicode/utf8"
+	"unsafe"
 )
 
 const (
@@ -68,4 +69,15 @@ func utf16ToUTF8(s []uint16) []byte {
 		buf = append(buf, b...)
 	}
 	return buf
+}
+
+// extractUTF16Str uses unsafe package to copy UTF16 string
+// to a byte slice. Needed for INOUT stored procedure parameter.
+func extractUTF16Str(s []uint16) []byte {
+	var out []byte
+	for i := range s {
+		b := extract(unsafe.Pointer(&s[i]), unsafe.Sizeof(s[i]))
+		out = append(out, b...)
+	}
+	return out
 }

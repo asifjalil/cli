@@ -5,6 +5,7 @@ package cli
 */
 import "C"
 import (
+	"bytes"
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
@@ -74,17 +75,33 @@ func newOut(hstmt C.SQLHANDLE, sqlOut *sql.Out, idx int) (*out, error) {
 			plen = &ind
 		case string:
 			var ind C.SQLLEN = C.SQL_NTS
+			// data buffer size can't be based on the input size
+			// because it can be smaller than the output size.
+			// So use SQLDescribeParam for the parameter size on the database.
+			ret := C.SQLDescribeParam(C.SQLHSTMT(hstmt), C.SQLUSMALLINT(idx+1),
+				&sqltype, &parameterSize, &decimalDigits, &nullable)
+			if !success(ret) {
+				return nil, formatError(C.SQL_HANDLE_STMT, hstmt)
+			}
+			// Using WCHAR instead of CHAR type because Go string is utf-8 coded.
+			// That maps to WCHAR in ODBC/CLI.
 			ctype = C.SQL_C_WCHAR
 			sqltype = C.SQL_WCHAR
+			// https://www.ibm.com/support/knowledgecenter/en/SSEPGG_11.1.0/com.ibm.db2.luw.apdv.cli.doc/doc/c0006840.html
+			// The Unicode string arguments must be in UCS-2 encoding (native-endian format).
 			s16 := stringToUTF16(d)
-			data = extract(unsafe.Pointer(&s16[0]), unsafe.Sizeof(s16))
-			l := len(data)
-			if l == 0 {
-				l = 1 // size cannot be negative
+			b := extractUTF16Str(s16)
+			// utf16 uses 2 bytes per character, plus the 2 byte null terminator
+			data = make([]byte, (parameterSize*2)+2)
+			if len(b) > len(data) {
+				return nil,
+					fmt.Errorf("database/sql/driver: [asifjalil][CLI Driver]:"+
+						"At param. index %d INOUT utf16 string %q size %d is greater than the allocated OUT buffer size %d",
+						idx+1, d, len(b), len(data))
 			}
-			l *= 2 // every char on the database takes 2 bytes
-			buflen = C.SQLLEN(l)
-			// use SQL_NTS to indicate that the string null terminated
+			copy(data, b)
+			buflen = C.SQLLEN(len(data))
+			// use SQL_NTS to indicate that the string is null terminated
 			plen = &ind
 		case int64:
 			ctype = C.SQL_C_SBIGINT
@@ -122,13 +139,16 @@ func newOut(hstmt C.SQLHANDLE, sqlOut *sql.Out, idx int) (*out, error) {
 			decimalDigits = 3
 			parameterSize = 20 + C.SQLULEN(decimalDigits)
 		case []byte:
-			ctype = C.SQL_C_BINARY
-			sqltype = C.SQL_BINARY
-			data = make([]byte, len(d))
+			ret := C.SQLDescribeParam(C.SQLHSTMT(hstmt), C.SQLUSMALLINT(idx+1),
+				&sqltype, &parameterSize, &decimalDigits, &nullable)
+			if !success(ret) {
+				return nil, formatError(C.SQL_HANDLE_STMT, hstmt)
+			}
+			ctype = sqlTypeToCType(sqltype)
+			data = make([]byte, parameterSize)
 			copy(data, d)
 			buflen = C.SQLLEN(len(data))
 			plen = &buflen
-			parameterSize = C.SQLULEN(len(data))
 		default:
 			return nil, fmt.Errorf("database/sql/driver: [asifjalil][CLI Driver]: unsupported type %T in sql.Out.Dest at index %d",
 				d, idx+1)
@@ -140,7 +160,13 @@ func newOut(hstmt C.SQLHANDLE, sqlOut *sql.Out, idx int) (*out, error) {
 		if !success(ret) {
 			return nil, formatError(C.SQL_HANDLE_STMT, hstmt)
 		}
-		data = make([]byte, parameterSize)
+		if sqltype == C.SQL_WCHAR {
+			// Output is a utf16 string that requires 2 bytes per character
+			// and 2 byte null terminator
+			data = make([]byte, (parameterSize*2)+2)
+		} else {
+			data = make([]byte, parameterSize)
+		}
 		ctype = sqlTypeToCType(sqltype)
 		buflen = C.SQLLEN(len(data))
 		plen = &buflen
@@ -178,17 +204,17 @@ func (o *out) value() (driver.Value, error) {
 		return *((*int32)(p)), nil
 	case C.SQL_C_SBIGINT:
 		return *((*int64)(p)), nil
-	case C.SQL_C_DOUBLE:
+	case C.SQL_C_DOUBLE, C.SQL_C_FLOAT:
 		return *((*float64)(p)), nil
 	case C.SQL_C_CHAR:
 		// handle DECFLOAT whose default C type is CHAR
-		if o.sqltype == C.SQL_DECFLOAT {
+		if o.sqltype == C.SQL_DECFLOAT || o.sqltype == C.SQL_DECIMAL || o.sqltype == C.SQL_NUMERIC {
 			s := string(buf[:o.buflen])
 			f, err := strconv.ParseFloat(s, 64)
 			return f, err
 		}
 		return buf[:o.buflen], nil
-	case C.SQL_C_WCHAR:
+	case C.SQL_C_WCHAR, C.SQL_C_DBCHAR:
 		if p == nil {
 			return nil, nil
 		}
@@ -222,7 +248,14 @@ func (o *out) value() (driver.Value, error) {
 			time.Local)
 		return r, nil
 	case C.SQL_C_BINARY:
-		return buf[:o.buflen], nil
+		// We allocated columnsized byte slice for o.data
+		// That's the max size. Returned data can be shorter
+		// than that, so remove null bytes.
+		b := bytes.Trim(buf, "\x00")
+		if len(b) == 0 {
+			return nil, nil
+		}
+		return b, nil
 	}
 	return nil, fmt.Errorf("database/sql/driver: [asifjalil][CLI Driver]: unsupported ctype %d (sqltype: %d) for stored procedure OUTPUT parameter value at index %d",
 		o.ctype, o.sqltype, o.idx)
@@ -250,14 +283,4 @@ func (o *out) convertAssign() error {
 	}
 
 	return convertAssign(o.sqlOut.Dest, dv)
-}
-
-// https://tylerchr.blog/golang-arbitrary-memory
-// extract reads arbitrary memory.
-func extract(ptr unsafe.Pointer, size uintptr) []byte {
-	out := make([]byte, size)
-	for i := range out {
-		out[i] = *((*byte)(unsafe.Pointer(uintptr(ptr) + uintptr(i))))
-	}
-	return out
 }

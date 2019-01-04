@@ -4,6 +4,7 @@ package cli
 #include <sqlcli1.h>
 */
 import "C"
+import "unsafe"
 
 // https://www.ibm.com/support/knowledgecenter/en/SSEPGG_11.1.0/com.ibm.db2.luw.apdv.cli.doc/doc/r0000526.html
 func sqlTypeToCType(sqltype C.SQLSMALLINT) C.SQLSMALLINT {
@@ -63,4 +64,17 @@ func sqlTypeToCType(sqltype C.SQLSMALLINT) C.SQLSMALLINT {
 		ctype = C.SQL_C_WCHAR
 	}
 	return ctype
+}
+
+// https://tylerchr.blog/golang-arbitrary-memory
+// extract reads arbitrary memory.
+// Note: it isn't meant for array, slice, or map.
+// How to use it with a slice, check out extractUTF16Str
+// function as an example.
+func extract(ptr unsafe.Pointer, size uintptr) []byte {
+	out := make([]byte, size)
+	for i := range out {
+		out[i] = *((*byte)(unsafe.Pointer(uintptr(ptr) + uintptr(i))))
+	}
+	return out
 }

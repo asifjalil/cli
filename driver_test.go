@@ -541,6 +541,13 @@ func (nb NullByte) Value() (driver.Value, error) {
 	return nb.Byte, nil
 }
 
+func (nb NullByte) String() string {
+	if !nb.Valid {
+		return "-"
+	}
+	return string(nb.Byte)
+}
+
 // for issue #2
 // Empty VarBinary causes panic.
 func TestVarBinary(t *testing.T) {
@@ -665,6 +672,8 @@ func TestSPInOut(t *testing.T) {
 	}
 	defer db.close()
 
+	// for real data type test use float32 instead of float64
+	var f32 float32 = 1.99999
 	ts := time.Date(2009, time.November, 10, 23, 6, 29, 10011001000, time.UTC)
 	createSp := `CREATE PROCEDURE test_inout(
 		INOUT p_a %s)
@@ -727,14 +736,28 @@ func TestSPInOut(t *testing.T) {
 			want:      sql.Out{Dest: &sql.NullFloat64{Valid: false}, In: true},
 			got:       sql.Out{Dest: &sql.NullFloat64{Valid: false}, In: true},
 		},
-
 		{
 			paramType: "double",
 			want:      sql.Out{Dest: &sql.NullFloat64{Float64: 1.999999, Valid: true}, In: true},
 			got:       sql.Out{Dest: &sql.NullFloat64{Float64: 1.999999, Valid: true}, In: true},
 		},
 		{
+			paramType: "float",
+			want:      sql.Out{Dest: &sql.NullFloat64{Float64: 1.999999, Valid: true}, In: true},
+			got:       sql.Out{Dest: &sql.NullFloat64{Float64: 1.999999, Valid: true}, In: true},
+		},
+		{
+			paramType: "real",
+			want:      sql.Out{Dest: &f32, In: true},
+			got:       sql.Out{Dest: &f32, In: true},
+		},
+		{
 			paramType: "double",
+			want:      sql.Out{Dest: &sql.NullFloat64{Float64: -1.999999, Valid: true}, In: true},
+			got:       sql.Out{Dest: &sql.NullFloat64{Float64: -1.999999, Valid: true}, In: true},
+		},
+		{
+			paramType: "float",
 			want:      sql.Out{Dest: &sql.NullFloat64{Float64: -1.999999, Valid: true}, In: true},
 			got:       sql.Out{Dest: &sql.NullFloat64{Float64: -1.999999, Valid: true}, In: true},
 		},
@@ -749,9 +772,19 @@ func TestSPInOut(t *testing.T) {
 			got:       sql.Out{Dest: &sql.NullFloat64{Float64: 1.999999, Valid: true}, In: true},
 		},
 		{
+			paramType: "decimal(7,1)",
+			want:      sql.Out{Dest: &sql.NullFloat64{Float64: 199999.9, Valid: true}, In: true},
+			got:       sql.Out{Dest: &sql.NullFloat64{Float64: 199999.9, Valid: true}, In: true},
+		},
+		{
 			paramType: "decfloat",
 			want:      sql.Out{Dest: &sql.NullFloat64{Float64: -1.999999, Valid: true}, In: true},
 			got:       sql.Out{Dest: &sql.NullFloat64{Float64: -1.999999, Valid: true}, In: true},
+		},
+		{
+			paramType: "decimal(7,1)",
+			want:      sql.Out{Dest: &sql.NullFloat64{Float64: -199999.9, Valid: true}, In: true},
+			got:       sql.Out{Dest: &sql.NullFloat64{Float64: -199999.9, Valid: true}, In: true},
 		},
 		{
 			paramType: "varbinary(255)",
@@ -760,8 +793,8 @@ func TestSPInOut(t *testing.T) {
 		},
 		{
 			paramType: "varbinary(255)",
-			want:      sql.Out{Dest: &NullByte{Byte: []byte(""), Valid: true}, In: true},
-			got:       sql.Out{Dest: &NullByte{Byte: []byte(""), Valid: true}, In: true},
+			want:      sql.Out{Dest: &NullByte{Byte: []byte(" "), Valid: true}, In: true},
+			got:       sql.Out{Dest: &NullByte{Byte: []byte(" "), Valid: true}, In: true},
 		},
 		{
 			paramType: "varbinary(255)",
@@ -800,9 +833,108 @@ func TestSPInOut(t *testing.T) {
 		}
 
 		if !reflect.DeepEqual(tc.want, tc.got) {
-			t.Errorf("testcase #%d: Want %v: Got %v\n", i, tc.want, tc.got)
+			t.Errorf("***FAIL*** testcase #%d: paramType: %v: Want %v: Got %v\n", i, tc.paramType, tc.want, tc.got)
+			/*
+				if g, ok := tc.got.Dest.(*NullByte); ok {
+					w := tc.want.Dest.(*NullByte)
+					if g.String() != w.String() {
+						t.Errorf("Want %q; Got %q\n", w.String(), g.String())
+						//t.Errorf("***FAIL*** testcase #%d: paramType: %v: Want %v: Got %v\n", i, tc.paramType, tc.want, tc.got)
+					}
+				} else {
+					t.Errorf("***FAIL*** testcase #%d: paramType: %v: Want %v: Got %v\n", i, tc.paramType, tc.want, tc.got)
+				}
+			*/
 		} else {
 			t.Logf("testcase #%d: paramType: %v: Got %v\n", i, tc.paramType, tc.got.Dest)
+		}
+	}
+}
+
+func TestSPStringInOut(t *testing.T) {
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	// Out is string is bigger than In
+	createSp := `CREATE PROCEDURE test_inout(
+		INOUT p_a %s)
+		LANGUAGE SQL
+		SPECIFIC test_inout
+		BEGIN
+			SET p_a = repeat(p_a, 2);
+		END
+		`
+	callSp := "call test_inout(?)"
+	dropSp := "drop procedure test_inout"
+
+	testCases := []struct {
+		paramType string
+		want      string
+		inout     sql.Out
+	}{
+		{
+			paramType: "varchar(25)",
+			want:      "Hello, World Hello, World",
+			inout:     sql.Out{Dest: &sql.NullString{String: "Hello, World ", Valid: true}, In: true},
+		},
+		{
+			paramType: "varchar(20) for bit data",
+			want:      "!!",
+			inout:     sql.Out{Dest: &NullByte{Byte: []byte("!"), Valid: true}, In: true},
+		},
+		{
+			paramType: "clob(2)",
+			want:      "11",
+			inout:     sql.Out{Dest: &sql.NullString{String: "1", Valid: true}, In: true},
+		},
+		/*
+			{
+				paramType: "varbinary(100)",
+				want:      "Hello, 世界Hello, 世界",
+				inout:     sql.Out{Dest: &NullByte{Byte: []byte("Hello, 世界"), Valid: true}, In: true},
+			},
+		*/
+	}
+
+	for i, tc := range testCases {
+		// create the SP
+		_, err = db.Exec(fmt.Sprintf(createSp, tc.paramType))
+		if err != nil {
+			t.Fatalf("Failed to run %v because %v\n", createSp, err)
+		}
+
+		// call the SP
+		_, err = db.Exec(callSp, tc.inout)
+		if err != nil {
+			t.Fatalf("testcase #%d: paramType %s failed because %v\n", i, tc.paramType, err)
+		}
+
+		// drop the SP
+		_, err = db.Exec(dropSp)
+		if err != nil {
+			t.Fatalf("Failed to run %v because %v\n", dropSp, err)
+		}
+
+		switch g := tc.inout.Dest.(type) {
+		case *sql.NullString:
+			if (*g).String != tc.want {
+				t.Errorf("testcase #%d: paramType: %s: Want %s, Got %s\n", i, tc.paramType, tc.want, (*g).String)
+			} else {
+				t.Logf("Got NullString: %v\n", *g)
+			}
+		case *NullByte:
+			if (*g).String() != tc.want {
+				t.Errorf("testcase #%d: paramType: %s: Want %s, Got %s\n", i, tc.paramType, tc.want, (*g).String())
+			} else {
+				t.Logf("Got NullByte: %v\n", *g)
+			}
+		case *[]uint8:
+			t.Logf("Got []byte: %v", *g)
+		default:
+			t.Errorf("Unknown type %T\n", g)
 		}
 	}
 }
