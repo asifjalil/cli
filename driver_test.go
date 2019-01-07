@@ -53,7 +53,7 @@ func newTestDB() (*testDB, error) {
 		config.pwd = os.Getenv("DATABASE_PASSWORD")
 	}
 
-	connStr := fmt.Sprintf("sqlconnect;DATABASE = %s; UID = %s; PWD = %s",
+	connStr := fmt.Sprintf("sqlconnect;DATABASE = %s; UID = %s; PWD = %s;",
 		config.database, config.uid, config.pwd)
 
 	db, err := sql.Open("cli", connStr)
@@ -78,20 +78,20 @@ func TestScan(t *testing.T) {
 
 	db, err := newTestDB()
 	if err != nil {
-		t.Fatal(err)
+		die(t, "failed because %v", err)
 	}
 	defer db.close()
 	err = db.QueryRowContext(context.Background(), "values('hello', NULL, 12345, 12345.6789)").Scan(&s1,
 		&s2, &i1, &f1)
 	switch {
 	case err != nil:
-		t.Error(err)
+		warn(t, "error: %v", err)
 	case s1 != "hello" || s2.String != "" || i1 != 12345 ||
 		f1 != 12345.6789:
-		t.Errorf("Expected: s1:\"hello\", s2:\"\", i1: 12345, f1: 12345.6789|Got: s1:%s, s2:%s, i1: %d, f1: %f",
+		warn(t, "Expected: s1:\"hello\", s2:\"\", i1: 12345, f1: 12345.6789|Got: s1:%s, s2:%s, i1: %d, f1: %f",
 			s1, s2.String, i1, f1)
 	default:
-		t.Log("All Ok!")
+		info(t, "All Ok!")
 	}
 }
 
@@ -102,27 +102,27 @@ func TestTimeStamp(t *testing.T) {
 	ts := time.Date(2009, time.November, 10, 23, 6, 29, 10011001000, time.UTC)
 	db, err := newTestDB()
 	if err != nil {
-		t.Fatal(err)
+		die(t, "failed to create db object: %v", err)
 	}
 	defer db.close()
 
 	// start transaction
 	tx, err := db.Begin()
 	if err != nil {
-		t.Fatal(err)
+		die(t, "transaction begin failed because: %v", err)
 	}
 
 	// insert value
 	_, err = tx.Exec(`INSERT INTO in_tray(received, source, subject, note_text) 
 		VALUES(?, ?, ?, ?)`, ts, "TEST", nil, nil)
 	if err != nil {
-		t.Error(err)
+		warn(t, "insert failed because %v", err)
 	}
 
 	_, err = tx.ExecContext(context.Background(), `INSERT INTO in_tray(received, source, subject, note_text) 
 		VALUES(?, ?, ?, ?)`, ts, "TEST", nil, nil)
 	if err != nil {
-		t.Error(err)
+		warn(t, "insert failed because %v", err)
 	}
 
 	// check that the data is in the table
@@ -132,14 +132,14 @@ func TestTimeStamp(t *testing.T) {
 
 	switch {
 	case err == sql.ErrNoRows:
-		t.Error("No new timestamp in table IN_TRAY - insert didn't work")
+		warn(t, "No new timestamp in table IN_TRAY - insert didn't work")
 	case err != nil:
-		t.Error(err)
+		warn(t, "insert into IN_TRAY failed because %v", err)
 	default:
 		// Timestamps are stored as is but without the timezone information.
 		// When a timestamp is returned from the database, the driver/Go assumes
 		// local timezone.
-		t.Log("database timestamp with local timezone:", db_ts)
+		info(t, "database timestamp with local timezone: %v", db_ts)
 		// In this case we used UTC, so change the local timezone to UTC.
 		db_ts = time.Date(db_ts.Year(),
 			db_ts.Month(),
@@ -150,14 +150,14 @@ func TestTimeStamp(t *testing.T) {
 			db_ts.Nanosecond(),
 			time.UTC)
 		if !ts.Equal(db_ts) {
-			t.Error("Expected: ", ts, "|Got:", db_ts)
+			warn(t, "Expected: %v| Got: %v", ts, db_ts)
 		}
 	}
 
 	// cleanup
 	err = tx.Rollback()
 	if err != nil {
-		t.Error(err)
+		warn(t, "rollback failed because %v", err)
 	}
 }
 
@@ -529,8 +529,15 @@ func (nb *NullByte) Scan(value interface{}) error {
 		nb.Byte, nb.Valid = nil, false
 		return nil
 	}
+	if _, ok := value.([]byte); !ok {
+		return fmt.Errorf("Unsupported value type %T in NullByte.Scan", value)
+	}
 	nb.Valid = true
-	nb.Byte = value.([]byte)
+	bv := value.([]byte)
+	if nb.Byte == nil {
+		nb.Byte = make([]byte, len(bv))
+	}
+	copy(nb.Byte, bv)
 	return nil
 }
 
@@ -592,79 +599,7 @@ func TestVarBinary(t *testing.T) {
 	}
 }
 
-func TestSPOut(t *testing.T) {
-	db, err := newTestDB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.close()
-
-	_, err = db.Exec(`
-	 CREATE PROCEDURE doubleSum(IN p_a int
-		, IN p_b int
-		, OUT p_r int)
-	LANGUAGE SQL
-	SPECIFIC doublesum
-	BEGIN
-		SET p_r = 2 *(p_a + p_b);
-	END
-	 `)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		db.Exec("DROP PROCEDURE doubleSum")
-	}()
-
-	var result int
-	procStmt := "CALL doublesum(2, 2, ?)"
-	_, err = db.ExecContext(context.Background(), procStmt,
-		sql.Out{Dest: &result})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result != 8 {
-		t.Errorf("Expected 8, got %d\n", result)
-	}
-	t.Logf("%s returned %d\n", procStmt, result)
-}
-
-func TestSPClobOut(t *testing.T) {
-	db, err := newTestDB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.close()
-
-	_, err = db.Exec(`
-	 CREATE PROCEDURE out_param_clob(IN empno char(6)
-		, IN resume_format varchar(10)
-		, OUT resume clob)
-	LANGUAGE SQL
-	SPECIFIC out_param_clob
-	BEGIN
-		select resume into resume from emp_resume
-		where empno = empno and resume_format = resume_format
-		fetch first 1 row only;
-	END
-	 `)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		db.Exec("DROP PROCEDURE out_param_clob")
-	}()
-
-	var resume string
-	procStmt := "CALL out_param_clob('000140', 'ascii', ?)"
-	_, err = db.ExecContext(context.Background(), procStmt,
-		sql.Out{Dest: &resume})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("%s returned %s\n", procStmt, resume)
-}
-
+// Tests that INOUT option works with DB2 Stored Procedure.
 func TestSPInOut(t *testing.T) {
 	db, err := newTestDB()
 	if err != nil {
@@ -716,18 +651,18 @@ func TestSPInOut(t *testing.T) {
 			got:       sql.Out{Dest: &sql.NullInt64{Int64: 9223372036854775807, Valid: true}, In: true},
 		},
 		{
-			paramType: "varchar(15)",
+			paramType: "varchar(1000)",
 			want:      sql.Out{Dest: &sql.NullString{Valid: false}, In: true},
 			got:       sql.Out{Dest: &sql.NullString{Valid: false}, In: true},
 		},
 
 		{
-			paramType: "varchar(15)",
+			paramType: "varchar(1000)",
 			want:      sql.Out{Dest: &sql.NullString{String: "", Valid: true}, In: true},
 			got:       sql.Out{Dest: &sql.NullString{String: "", Valid: true}, In: true},
 		},
 		{
-			paramType: "varchar(20)",
+			paramType: "varchar(1000)",
 			want:      sql.Out{Dest: &sql.NullString{String: "Hello World", Valid: true}, In: true},
 			got:       sql.Out{Dest: &sql.NullString{String: "Hello World", Valid: true}, In: true},
 		},
@@ -742,24 +677,24 @@ func TestSPInOut(t *testing.T) {
 			got:       sql.Out{Dest: &sql.NullFloat64{Float64: 1.999999, Valid: true}, In: true},
 		},
 		{
-			paramType: "float",
-			want:      sql.Out{Dest: &sql.NullFloat64{Float64: 1.999999, Valid: true}, In: true},
-			got:       sql.Out{Dest: &sql.NullFloat64{Float64: 1.999999, Valid: true}, In: true},
-		},
-		{
-			paramType: "real",
-			want:      sql.Out{Dest: &f32, In: true},
-			got:       sql.Out{Dest: &f32, In: true},
-		},
-		{
 			paramType: "double",
 			want:      sql.Out{Dest: &sql.NullFloat64{Float64: -1.999999, Valid: true}, In: true},
 			got:       sql.Out{Dest: &sql.NullFloat64{Float64: -1.999999, Valid: true}, In: true},
 		},
 		{
 			paramType: "float",
+			want:      sql.Out{Dest: &sql.NullFloat64{Float64: 1.999999, Valid: true}, In: true},
+			got:       sql.Out{Dest: &sql.NullFloat64{Float64: 1.999999, Valid: true}, In: true},
+		},
+		{
+			paramType: "float",
 			want:      sql.Out{Dest: &sql.NullFloat64{Float64: -1.999999, Valid: true}, In: true},
 			got:       sql.Out{Dest: &sql.NullFloat64{Float64: -1.999999, Valid: true}, In: true},
+		},
+		{
+			paramType: "real",
+			want:      sql.Out{Dest: &f32, In: true},
+			got:       sql.Out{Dest: &f32, In: true},
 		},
 		{
 			paramType: "decfloat",
@@ -772,14 +707,14 @@ func TestSPInOut(t *testing.T) {
 			got:       sql.Out{Dest: &sql.NullFloat64{Float64: 1.999999, Valid: true}, In: true},
 		},
 		{
-			paramType: "decimal(7,1)",
-			want:      sql.Out{Dest: &sql.NullFloat64{Float64: 199999.9, Valid: true}, In: true},
-			got:       sql.Out{Dest: &sql.NullFloat64{Float64: 199999.9, Valid: true}, In: true},
-		},
-		{
 			paramType: "decfloat",
 			want:      sql.Out{Dest: &sql.NullFloat64{Float64: -1.999999, Valid: true}, In: true},
 			got:       sql.Out{Dest: &sql.NullFloat64{Float64: -1.999999, Valid: true}, In: true},
+		},
+		{
+			paramType: "decimal(7,1)",
+			want:      sql.Out{Dest: &sql.NullFloat64{Float64: 199999.9, Valid: true}, In: true},
+			got:       sql.Out{Dest: &sql.NullFloat64{Float64: 199999.9, Valid: true}, In: true},
 		},
 		{
 			paramType: "decimal(7,1)",
@@ -817,36 +752,25 @@ func TestSPInOut(t *testing.T) {
 		// create the SP
 		_, err = db.Exec(fmt.Sprintf(createSp, tc.paramType))
 		if err != nil {
-			t.Fatalf("testcase #%d failed because %v\n", i, err)
+			die(t, "testcase #%d: paramType %v failed because %v\n", i, tc.paramType, err)
 		}
 
 		// call the SP
 		_, err = db.Exec(callSp, tc.got)
 		if err != nil {
-			t.Fatalf("testcase #%d failed because %v\n", i, err)
+			die(t, "testcase #%d: paramType %v failed because %v\n", i, tc.paramType, err)
 		}
 
 		// drop the SP
 		_, err = db.Exec(dropSp)
 		if err != nil {
-			t.Fatalf("Failed to run %v because %v", dropSp, err)
+			die(t, "Failed to run %v because %v", dropSp, err)
 		}
 
 		if !reflect.DeepEqual(tc.want, tc.got) {
-			t.Errorf("***FAIL*** testcase #%d: paramType: %v: Want %v: Got %v\n", i, tc.paramType, tc.want, tc.got)
-			/*
-				if g, ok := tc.got.Dest.(*NullByte); ok {
-					w := tc.want.Dest.(*NullByte)
-					if g.String() != w.String() {
-						t.Errorf("Want %q; Got %q\n", w.String(), g.String())
-						//t.Errorf("***FAIL*** testcase #%d: paramType: %v: Want %v: Got %v\n", i, tc.paramType, tc.want, tc.got)
-					}
-				} else {
-					t.Errorf("***FAIL*** testcase #%d: paramType: %v: Want %v: Got %v\n", i, tc.paramType, tc.want, tc.got)
-				}
-			*/
+			warn(t, "testcase #%d: paramType: %v: Want %v: Got %v\n", i, tc.paramType, tc.want, tc.got)
 		} else {
-			t.Logf("testcase #%d: paramType: %v: Got %v\n", i, tc.paramType, tc.got.Dest)
+			info(t, "testcase #%d: paramType: %v: Got %v\n", i, tc.paramType, tc.got.Dest)
 		}
 	}
 }
@@ -858,9 +782,10 @@ func TestSPStringInOut(t *testing.T) {
 	}
 	defer db.close()
 
-	// Out is string is bigger than In
+	// Out is bigger than In
 	createSp := `CREATE PROCEDURE test_inout(
-		INOUT p_a %s)
+		INOUT p_a %s
+	)
 		LANGUAGE SQL
 		SPECIFIC test_inout
 		BEGIN
@@ -881,60 +806,95 @@ func TestSPStringInOut(t *testing.T) {
 			inout:     sql.Out{Dest: &sql.NullString{String: "Hello, World ", Valid: true}, In: true},
 		},
 		{
-			paramType: "varchar(20) for bit data",
-			want:      "!!",
-			inout:     sql.Out{Dest: &NullByte{Byte: []byte("!"), Valid: true}, In: true},
-		},
-		{
 			paramType: "clob(2)",
 			want:      "11",
 			inout:     sql.Out{Dest: &sql.NullString{String: "1", Valid: true}, In: true},
 		},
-		/*
-			{
-				paramType: "varbinary(100)",
-				want:      "Hello, 世界Hello, 世界",
-				inout:     sql.Out{Dest: &NullByte{Byte: []byte("Hello, 世界"), Valid: true}, In: true},
-			},
-		*/
 	}
 
 	for i, tc := range testCases {
 		// create the SP
 		_, err = db.Exec(fmt.Sprintf(createSp, tc.paramType))
 		if err != nil {
-			t.Fatalf("Failed to run %v because %v\n", createSp, err)
+			die(t, "Failed to run %v because %v\n", createSp, err)
 		}
 
 		// call the SP
 		_, err = db.Exec(callSp, tc.inout)
 		if err != nil {
-			t.Fatalf("testcase #%d: paramType %s failed because %v\n", i, tc.paramType, err)
+			die(t, "testcase #%d: paramType %s failed because %v\n", i, tc.paramType, err)
 		}
 
 		// drop the SP
 		_, err = db.Exec(dropSp)
 		if err != nil {
-			t.Fatalf("Failed to run %v because %v\n", dropSp, err)
+			die(t, "Failed to run %v because %v\n", dropSp, err)
 		}
 
 		switch g := tc.inout.Dest.(type) {
 		case *sql.NullString:
 			if (*g).String != tc.want {
-				t.Errorf("testcase #%d: paramType: %s: Want %s, Got %s\n", i, tc.paramType, tc.want, (*g).String)
+				warn(t, "testcase #%d: paramType: %s: Want %s, Got %s\n",
+					i, tc.paramType, tc.want, (*g).String)
 			} else {
-				t.Logf("Got NullString: %v\n", *g)
+				info(t, "Got: %#v\n", *g)
 			}
-		case *NullByte:
-			if (*g).String() != tc.want {
-				t.Errorf("testcase #%d: paramType: %s: Want %s, Got %s\n", i, tc.paramType, tc.want, (*g).String())
-			} else {
-				t.Logf("Got NullByte: %v\n", *g)
-			}
-		case *[]uint8:
-			t.Logf("Got []byte: %v", *g)
 		default:
-			t.Errorf("Unknown type %T\n", g)
+			warn(t, "Unknown type %T\n", g)
 		}
 	}
+}
+
+func TestSPClobOut(t *testing.T) {
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	_, err = db.Exec(`
+	 CREATE PROCEDURE out_param_clob(IN empno char(6)
+		, IN resume_format varchar(10)
+		, OUT resume clob)
+	LANGUAGE SQL
+	SPECIFIC out_param_clob
+	BEGIN
+		select resume into resume from emp_resume
+		where empno = empno and resume_format = resume_format
+		fetch first 1 row only;
+	END
+	 `)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		db.Exec("DROP PROCEDURE out_param_clob")
+	}()
+
+	var resume string
+	procStmt := "CALL out_param_clob('000140', 'ascii', ?)"
+	_, err = db.ExecContext(context.Background(), procStmt,
+		sql.Out{Dest: &resume})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%s returned %s\n", procStmt, resume)
+}
+
+func logf(t *testing.T, format string, a ...interface{}) {
+	t.Logf(format, a...)
+}
+
+func info(t *testing.T, format string, a ...interface{}) {
+	logf(t, fmt.Sprintf("%-10s", "ok")+format, a...)
+}
+
+func warn(t *testing.T, format string, a ...interface{}) {
+	logf(t, fmt.Sprintf("%-10s", "---FAIL:")+format, a...)
+	t.Fail()
+}
+
+func die(t *testing.T, format string, a ...interface{}) {
+	logf(t, fmt.Sprintf("%-10s", "---FAIL:")+format, a...)
+	t.FailNow()
 }
