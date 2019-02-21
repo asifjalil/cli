@@ -6,8 +6,10 @@ import (
 	"database/sql/driver"
 	"encoding/hex"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -197,6 +199,66 @@ func TestXML(t *testing.T) {
 				t.Log(tc.got)
 			}
 		})
+	}
+}
+
+// for issue #8
+func TestLgXML(t *testing.T) {
+	tabname := "testxml"
+	delFile := "_TEST/large.del"
+	createStmt := fmt.Sprintf("CREATE TABLE %s (Col1 XML)", tabname)
+	dropStmt := fmt.Sprintf("DROP TABLE %s", tabname)
+	queryStmt := fmt.Sprintf("SELECT col1 FROM %s", tabname)
+
+	if dir, err := os.Getwd(); err != nil {
+		die(t, "failed to lookup current directory: %v", err)
+	} else {
+		delFile = dir + "/" + delFile
+	}
+
+	xmlFile := strings.TrimSuffix(delFile, ".del") + ".xml"
+	b, err := ioutil.ReadFile(xmlFile)
+	if err != nil {
+		die(t, "Failed to read xml from file %s: %v", xmlFile, err)
+	}
+	wantXML := string(b)
+
+	importStmt := fmt.Sprintf("CALL SYSPROC.ADMIN_CMD('IMPORT FROM %s"+
+		" OF DEL XMLPARSE PRESERVE WHITESPACE REPLACE INTO %s')", delFile, tabname)
+	db, err := newTestDB()
+	if err != nil {
+		die(t, "Failed to connect to database: %v", err)
+	}
+	defer db.close()
+
+	// create test table
+	_, err = db.Exec(createStmt)
+	if err != nil {
+		die(t, "Failed to create table %s: %v", tabname, err)
+	}
+	defer func() {
+		db.Exec(dropStmt)
+	}()
+
+	// load xml data
+	_, err = db.Exec(importStmt)
+	if err != nil {
+		die(t, "Failed to run %q: %v", importStmt, err)
+	}
+	var gotXML string
+	err = db.QueryRow(queryStmt).Scan(&gotXML)
+	gotXML += "\n"
+	switch {
+	case err == sql.ErrNoRows:
+		warn(t, "Expected 1 row; Found 0")
+	case err != nil:
+		warn(t, "error: %v", err)
+	case wantXML != gotXML:
+		ioutil.WriteFile("want_xml.txt", []byte(wantXML), 0644)
+		ioutil.WriteFile("got_xml.txt", []byte(gotXML), 0644)
+		t.Error("wantXML doesn't match gotXML")
+	default:
+		info(t, "All OK")
 	}
 }
 

@@ -28,10 +28,29 @@ type column struct {
 }
 
 func (c *column) getData() ([]byte, error) {
+	/*
+		https://www.ibm.com/support/knowledgecenter/SSEPGG_11.1.0/com.ibm.db2.luw.apdv.cli.doc/doc/r0000604.html
+
+		Upon each SQLGetData() function call, if the data available for return is greater than or equal to the
+		BufferLength argument value, the data truncation occurs. Truncation is indicated by a function return code of
+		SQL_SUCCESS_WITH_INFO coupled with an SQLSTATE denoting data truncation. The application can call the
+		SQLGetData() function again, with the same ColumnNumber value, to get subsequent data from the same
+		unbound column starting at the point of truncation. To obtain the entire column, the application repeats
+		such calls until the function returns SQL_SUCCESS. The next call to the SQLGetData() function returns SQL_NO_DATA_FOUND.
+	*/
+
 	var total []byte
 	buf := make([]byte, 1024)
+
 loop:
 	for {
+		/*
+			get len(buf) bytes at a time.
+			After C.SQLGetData is called, c.len indicates number of bytes remaining.
+			It needs to be changed to "total" size at the end because
+			we return data as buf[:c.len]. If c.len is the remaining bytes
+			then we will truncate the data.
+		*/
 		ret := C.SQLGetData(c.h,
 			C.SQLUSMALLINT(c.idx+1), c.ctype,
 			C.SQLPOINTER(unsafe.Pointer(&buf[0])), C.SQLLEN(len(buf)),
@@ -49,20 +68,14 @@ loop:
 				return nil, err
 			}
 			// buf is not big enough; data has been truncated
-			i := len(buf)
-			total = append(total, buf[:i]...)
-			if c.len != C.SQL_NO_TOTAL {
-				n := int(c.len) // total bytes of our data
-				n -= i          // subtract already received
-				n += 2          // room for biggest (wchar) null-terminator
-				if len(buf) < n {
-					buf = make([]byte, n)
-				}
-			}
+			// save the partial data
+			total = append(total, buf...)
 		default:
 			return nil, formatError(C.SQL_HANDLE_STMT, C.SQLHANDLE(c.h))
 		}
 	}
+	// set c.len to total size to avoid truncation
+	c.len = C.SQLLEN(len(total))
 	return total, nil
 }
 
