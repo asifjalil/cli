@@ -943,6 +943,48 @@ func TestSPClobOut(t *testing.T) {
 	t.Logf("%s returned %s\n", procStmt, resume)
 }
 
+// To check if we can use sql.Query to run a non-select statement
+func TestDDLQuery(t *testing.T) {
+	tabname := "test"
+	createStmt := fmt.Sprintf("create table %s(col1 smallint)", tabname)
+	insertStmt := fmt.Sprintf("insert into %s values(1)", tabname)
+	selectStmt := fmt.Sprintf("select col1 from %s", tabname)
+	dropStmt := fmt.Sprintf("drop table %s", tabname)
+
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	_, err = db.Query(createStmt)
+	switch {
+	case err == sql.ErrNoRows:
+		info(t, "expected\n")
+	case err != nil:
+		die(t, "%q failed: %v\n", createStmt, err)
+	}
+
+	_, err = db.Exec(insertStmt)
+	if err != nil {
+		die(t, "%q failed: %v\n", insertStmt, err)
+	}
+
+	var val int
+	err = db.QueryRow(selectStmt).Scan(&val)
+	if err != nil {
+		die(t, "%q failed: %v\n", selectStmt, err)
+	}
+	if val != 1 {
+		die(t, "Expected 1, got %d\n", val)
+	}
+
+	_, err = db.Exec(dropStmt)
+	if err != nil {
+		die(t, "%q failed: %v\n", dropStmt, err)
+	}
+}
+
 func logf(t *testing.T, format string, a ...interface{}) {
 	t.Logf(format, a...)
 }
