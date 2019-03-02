@@ -384,7 +384,8 @@ func (s *stmt) bindColumns() error {
 		return formatError(C.SQL_HANDLE_STMT, s.hstmt)
 	}
 	if n < 1 {
-		return errors.New("database/sql/driver: [asifjalil][CLI Driver]: driver.Stmt.Query(...) did not create a result set")
+		// return errors.New("database/sql/driver: [asifjalil][CLI Driver]: driver.Stmt.Query(...) did not create a result set")
+		return sql.ErrNoRows
 	}
 	// fetch column descriptions
 	s.cols = make([]*column, n)
