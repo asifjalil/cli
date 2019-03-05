@@ -951,6 +951,10 @@ func TestDDLQuery(t *testing.T) {
 	selectStmt := fmt.Sprintf("select col1 from %s", tabname)
 	dropStmt := fmt.Sprintf("drop table %s", tabname)
 
+	type rowsAffected interface {
+		RowsAffected() int64
+	}
+
 	db, err := newTestDB()
 	if err != nil {
 		t.Fatal(err)
@@ -958,10 +962,9 @@ func TestDDLQuery(t *testing.T) {
 	defer db.close()
 
 	_, err = db.Query(createStmt)
-	switch {
-	case err == sql.ErrNoRows:
-		info(t, "expected\n")
-	case err != nil:
+	if affected, ok := err.(rowsAffected); ok {
+		info(t, "%q: row affected %d", createStmt, affected.RowsAffected())
+	} else {
 		die(t, "%q failed: %v\n", createStmt, err)
 	}
 

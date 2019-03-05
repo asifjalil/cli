@@ -76,3 +76,18 @@ func (e *cliError) SQLState() string {
 func (e *cliError) SQLCode() int {
 	return e.sqlcode
 }
+
+type rowsAffectedError struct {
+	rowsAffected int64
+}
+
+func (ra *rowsAffectedError) Error() string {
+	return fmt.Sprintf("asifjalil/cli: number of rows affected %d", ra.rowsAffected)
+}
+
+// RowsAffected returns the number of rows affected by an
+// update, insert, merge, or delete. -1 indicates a statement
+// other than update, insert, delete, or a merge.
+func (ra *rowsAffectedError) RowsAffected() int64 {
+	return ra.rowsAffected
+}

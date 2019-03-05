@@ -383,9 +383,16 @@ func (s *stmt) bindColumns() error {
 	if !success(ret) {
 		return formatError(C.SQL_HANDLE_STMT, s.hstmt)
 	}
+	// n < 1 indicates that the last statement or function executed
+	// did not generate a result set.
 	if n < 1 {
-		// return errors.New("database/sql/driver: [asifjalil][CLI Driver]: driver.Stmt.Query(...) did not create a result set")
-		return sql.ErrNoRows
+		// It could be a update/insert/delete/merge statement
+		// and it is possible to get a number of affected row count
+		rowsAffected, err := s.rowsAffected()
+		if err != nil {
+			return err
+		}
+		return &rowsAffectedError{rowsAffected: rowsAffected}
 	}
 	// fetch column descriptions
 	s.cols = make([]*column, n)
