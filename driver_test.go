@@ -1060,6 +1060,31 @@ func TestQueryExec(t *testing.T) {
 	}
 }
 
+func TestErrorNewLine(t *testing.T) {
+	errStmt := `
+                select case col1
+                        when 1 then 'one'
+                        else raise_error('70001', 'Dummy')
+                end
+                from (values(0)) as t(col1)`
+
+	db, err := newTestDB()
+	if err != nil {
+		die(t, "Failed to connect to db: %v", err)
+	}
+	defer db.Close()
+
+	var msg string
+	err = db.QueryRow(errStmt).Scan(&msg)
+	if err == nil {
+		die(t, "msg: %s:Expecting error, got nil error", msg)
+	}
+	if strings.HasSuffix(err.Error(), "\n") {
+		die(t, "DB error message shouldn't end in new line: |%v|\n")
+	}
+	info(t, "|%s|", err.Error())
+}
+
 func logf(t *testing.T, format string, a ...interface{}) {
 	t.Logf(format, a...)
 }

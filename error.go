@@ -6,6 +6,7 @@ package cli
 import "C"
 import (
 	"fmt"
+	"strings"
 	"unsafe"
 )
 
@@ -65,6 +66,9 @@ func formatError(ht C.SQLSMALLINT, h C.SQLHANDLE) (err *cliError) {
 			err.sqlcode = int(sqlCode)
 		}
 		err.message += utf16ToString(messageText)
+	}
+	if err.message != "" {
+		err.message = strings.TrimSpace(err.message)
 	}
 
 	return err
