@@ -988,6 +988,78 @@ func TestDDLQuery(t *testing.T) {
 	}
 }
 
+// Tests rowsAffectedError from sql.Query for statements
+// that don't produce rows/resultset
+func TestQueryExec(t *testing.T) {
+	var val int
+	qry := "SELECT 1 FROM syscat.tables where tabschema='abcd'"
+
+	db, err := newTestDB()
+	if err != nil {
+		die(t, "db connection failed: %v", err)
+	}
+	defer db.close()
+
+	info(t, "Testing QueryRow.Scan()")
+	info(t, strings.Repeat("#", 40))
+	err = db.QueryRow(qry).Scan(&val)
+	switch {
+	case err == sql.ErrNoRows:
+		info(t, "%q: returned empty resultset\n", qry)
+	case err != nil:
+		die(t, "%q failed: %v", err)
+	default:
+		info(t, "%q: got %d\n", qry, val)
+	}
+
+	info(t, "Testing Query")
+	info(t, strings.Repeat("#", 40))
+	rows, err := db.Query(qry)
+	switch {
+	case err == sql.ErrNoRows:
+		info(t, "%q: returned empty resultset\n", qry)
+	case err != nil:
+		die(t, "%q failed: %v\n", qry, err)
+	default:
+		for rows.Next() {
+			if err := rows.Scan(&val); err != nil {
+				die(t, "%q: rows.Scan failed: %v\n", qry, err)
+			}
+			info(t, "%q: got %d\n", qry, val)
+		}
+	}
+
+	if err := rows.Close(); err != nil {
+		die(t, "%q: rows.Close failed: %v\n", err)
+	}
+
+	execStmts := []string{
+		"create table test(col1 smallint)",
+		"insert into test values(1), (2), (3)",
+		"drop table test",
+	}
+	info(t, "Testing DDL")
+	info(t, strings.Repeat("#", 40))
+
+	type rowsaff interface {
+		RowsAffected() int64
+	}
+
+	for _, s := range execStmts {
+		_, err = db.Query(s)
+		switch {
+		case err == sql.ErrNoRows:
+			info(t, "%q returned empty result set", s)
+		default:
+			if i, ok := err.(rowsaff); ok {
+				info(t, "%q: rows affected %d\n", s, i.RowsAffected())
+			} else {
+				die(t, "%q failed: %v", s, err)
+			}
+		}
+	}
+}
+
 func logf(t *testing.T, format string, a ...interface{}) {
 	t.Logf(format, a...)
 }
