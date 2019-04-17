@@ -1085,6 +1085,40 @@ func TestErrorNewLine(t *testing.T) {
 	info(t, "|%s|", err.Error())
 }
 
+// for issue #10
+// overflow error is not reported
+func TestOverflow(t *testing.T) {
+	db, err := newTestDB()
+	if err != nil {
+		die(t, "Failed to connect to db: %v", err)
+	}
+	defer db.Close()
+
+	if err != nil {
+		t.Error(err)
+	}
+
+	// this statement should report an overflow error
+	// when casting the second value (2147483648) to an INT
+	rows, err := db.Query("SELECT INT(val) FROM (VALUES (2147483647), (2147483648), (2147483647) ) t (val)")
+	if err != nil {
+		die(t, "Query failed: %v", err)
+	}
+
+	var values []string
+	for rows.Next() {
+		var value string
+		rows.Scan(&value)
+		values = append(values, value)
+	}
+
+	if rows.Err() == nil {
+		die(t, "Expected overflow error; got nil error instead")
+	}
+
+	info(t, "values: %+v err: %+v", values, rows.Err())
+}
+
 func logf(t *testing.T, format string, a ...interface{}) {
 	t.Logf(format, a...)
 }
