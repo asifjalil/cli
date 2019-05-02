@@ -121,15 +121,23 @@ func (c *conn) PrepareContext(ctx context.Context, sql string) (driver.Stmt, err
 	// The prepare request is not sent to the server until either
 	// SQLDescribeParam(), SQLExecute(), SQLNumResultCols(), SQLDescribeCol(), or
 	// SQLColAttribute() is called using the same statement handle as the prepared statement.
-	// That means SQLPrepareW should be quick and no need to cancel it.
-	// Also, search for SQL_ATTR_ASYNC_ENABLE to see the CLI functions that can be called asynchronously
-	// and can be cancelled using SQLCancel. SQLPrepareW is not one of them.
-	// Prepare the query.
+	// Disable deferred prepare with the assumption that the user expects the statement
+	// to be prepared right now and get back any error.
+	ret = C.SQLSetStmtAttr(C.SQLHSTMT(hstmt),
+		C.SQL_ATTR_DEFERRED_PREPARE,
+		C.SQLPOINTER(uintptr(C.SQL_DEFERRED_PREPARE_OFF)), 0)
+	if !success(ret) {
+		err := formatError(C.SQL_HANDLE_STMT, hstmt)
+		C.SQLFreeHandle(C.SQL_HANDLE_STMT, hstmt)
+		return nil, err
+	}
+
 	ret = C.SQLPrepareW(C.SQLHSTMT(hstmt),
 		(*C.SQLWCHAR)(unsafe.Pointer(wsql)), C.SQL_NTS)
 	if !success(ret) {
+		err := formatError(C.SQL_HANDLE_STMT, hstmt)
 		C.SQLFreeHandle(C.SQL_HANDLE_STMT, hstmt)
-		return nil, formatError(C.SQL_HANDLE_STMT, hstmt)
+		return nil, err
 	}
 
 	select {

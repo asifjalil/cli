@@ -436,6 +436,27 @@ func TestQueryCancel(t *testing.T) {
 	}
 }
 
+func TestTxPrepare(t *testing.T) {
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		die(t, "%s", err)
+	}
+
+	stmt, err := tx.PrepareContext(context.Background(), "select 11 from abcd")
+	if err == nil {
+		stmt.Close()
+		die(t, "Expected PrepareContext to fail with SQL0204N and SQLSTATE=42704")
+	}
+	info(t, "%s", err)
+	tx.Commit()
+}
+
 func TestTxContext(t *testing.T) {
 	db, err := newTestDB()
 	if err != nil {
