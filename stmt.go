@@ -22,6 +22,7 @@ type stmt struct {
 	sql    string
 	closed bool
 	rows   bool
+	params []*param
 	cols   []*column
 	outs   []*out
 }
@@ -38,7 +39,7 @@ func (s *stmt) Close() error {
 	if !success(ret) {
 		return formatError(C.SQL_HANDLE_STMT, s.hstmt)
 	}
-
+	s.params = nil
 	s.cols = nil
 	s.outs = nil
 
@@ -130,7 +131,7 @@ func (s *stmt) query(ctx context.Context, args []driver.Value) (driver.Rows, err
 }
 
 // bindParam binds a driver.Value (Go value) to a parameter marker in an SQL statement
-func (s *stmt) bindParam(idx int, v driver.Value) error {
+func (s *stmt) bindParam(idx int, v driver.Value) (*param, error) {
 	var ctype, sqltype, decimal C.SQLSMALLINT
 	var size C.SQLULEN
 	var buflen C.SQLLEN
@@ -149,7 +150,7 @@ func (s *stmt) bindParam(idx int, v driver.Value) error {
 		ret := C.SQLDescribeParam(C.SQLHSTMT(s.hstmt), C.SQLUSMALLINT(idx+1),
 			&dataType, &parameterSize, &decimalDigits, &nullable)
 		if !success(ret) {
-			return formatError(C.SQL_HANDLE_STMT, s.hstmt)
+			return nil, formatError(C.SQL_HANDLE_STMT, s.hstmt)
 		}
 
 		ctype = C.SQL_C_DEFAULT
@@ -228,7 +229,7 @@ func (s *stmt) bindParam(idx int, v driver.Value) error {
 	case sql.Out:
 		o, err := newOut(s.hstmt, &d, idx)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		sqltype = o.sqltype
 		ctype = o.ctype
@@ -243,15 +244,15 @@ func (s *stmt) bindParam(idx int, v driver.Value) error {
 		plen = o.plen
 		s.outs = append(s.outs, o)
 	default:
-		return fmt.Errorf("database/sql/driver: [asifjalil][CLI Driver]: unsupported bind param. type %T at index %d", v, idx+1)
+		return nil, fmt.Errorf("database/sql/driver: [asifjalil][CLI Driver]: unsupported bind param. type %T at index %d", v, idx+1)
 	}
 	ret := C.SQLBindParameter(C.SQLHSTMT(s.hstmt), C.SQLUSMALLINT(idx+1),
 		inputOutputType, ctype, sqltype, size, decimal,
 		C.SQLPOINTER(buf), buflen, plen)
 	if !success(ret) {
-		return formatError(C.SQL_HANDLE_STMT, s.hstmt)
+		return nil, formatError(C.SQL_HANDLE_STMT, s.hstmt)
 	}
-	return nil
+	return &param{plen: plen, buf: buf}, nil
 }
 
 // sqlexec executes any prepared statement
@@ -322,11 +323,20 @@ func (s *stmt) sqlexec(ctx context.Context, args []driver.Value) error {
 	// }
 
 	// bind values to parameters
+	if s.params == nil && len(args) > 0 {
+		// allocate slice to store input value
+		s.params = make([]*param, len(args))
+	}
 	for i, a := range args {
-		err := s.bindParam(i, a)
+		p, err := s.bindParam(i, a)
 		if err != nil {
 			return err
 		}
+		// store the parameter so Go GC
+		// doesn't remove the buffer that
+		// has the input value.
+		// See issue #12.
+		s.params[i] = p
 	}
 
 	// execute the statement in a separate go routine. That way if the context is cancelled
