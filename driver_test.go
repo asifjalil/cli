@@ -55,7 +55,7 @@ func newTestDB() (*testDB, error) {
 		config.pwd = os.Getenv("DATABASE_PASSWORD")
 	}
 
-	connStr := fmt.Sprintf("sqlconnect;DATABASE = %s; UID = %s; PWD = %s;",
+	connStr := fmt.Sprintf("DATABASE = %s; UID = %s; PWD = %s;",
 		config.database, config.uid, config.pwd)
 
 	db, err := sql.Open("cli", connStr)
@@ -206,17 +206,25 @@ func TestXML(t *testing.T) {
 func TestLgXML(t *testing.T) {
 	tabname := "testxml"
 	delFile := "_TEST/large.del"
+	xmlFile := "_TEST/large.xml"
 	createStmt := fmt.Sprintf("CREATE TABLE %s (Col1 XML)", tabname)
 	dropStmt := fmt.Sprintf("DROP TABLE %s", tabname)
 	queryStmt := fmt.Sprintf("SELECT col1 FROM %s", tabname)
 
-	if dir, err := os.Getwd(); err != nil {
+	if home := os.Getenv("DATABASE_HOMEDIR"); home != "" {
+		delFile = home + "/" + delFile
+	} else if dir, err := os.Getwd(); err != nil {
 		die(t, "failed to lookup current directory: %v", err)
 	} else {
 		delFile = dir + "/" + delFile
 	}
 
-	xmlFile := strings.TrimSuffix(delFile, ".del") + ".xml"
+	if dir, err := os.Getwd(); err != nil {
+		die(t, "failed to lookup current directory: %v", err)
+	} else {
+		xmlFile = dir + "/" + xmlFile
+	}
+
 	b, err := ioutil.ReadFile(xmlFile)
 	if err != nil {
 		die(t, "Failed to read xml from file %s: %v", xmlFile, err)
@@ -693,7 +701,7 @@ func TestSPInOut(t *testing.T) {
 	// for real data type test use float32 instead of float64
 	var f32 float32 = 1.99999
 	ts := time.Date(2009, time.November, 10, 23, 6, 29, 10011001000, time.UTC)
-	createSp := `CREATE PROCEDURE test_inout(
+	createSp := `CREATE OR REPLACE PROCEDURE test_inout(
 		INOUT p_a %s)
 	LANGUAGE SQL
 	SPECIFIC test_inout
@@ -866,7 +874,7 @@ func TestSPStringInOut(t *testing.T) {
 	defer db.close()
 
 	// Out is bigger than In
-	createSp := `CREATE PROCEDURE test_inout(
+	createSp := `CREATE OR REPLACE PROCEDURE test_inout(
 		INOUT p_a %s
 	)
 		LANGUAGE SQL
@@ -936,7 +944,7 @@ func TestSPClobOut(t *testing.T) {
 	defer db.close()
 
 	_, err = db.Exec(`
-	 CREATE PROCEDURE out_param_clob(IN empno char(6)
+	 CREATE OR REPLACE PROCEDURE out_param_clob(IN empno char(6)
 		, IN resume_format varchar(10)
 		, OUT resume clob)
 	LANGUAGE SQL

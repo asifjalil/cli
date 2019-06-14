@@ -9,4 +9,7 @@ wait:  LOOP
   END LOOP wait;
 END
 @
+
+CONNECT RESET@
+TERMINATE@
 --#SET TERMINATOR ;

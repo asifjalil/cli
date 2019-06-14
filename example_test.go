@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"strings"
@@ -28,7 +27,7 @@ func Example() {
 func ExampleOpen() {
 	var val float64
 
-	connStr := "SQLConnect; Database = Sample;" // trailing semi-colon is required
+	connStr := getConStr() // trailing semi-colon is required
 	qry := "SELECT double(1.1) FROM sysibm.sysdummy1"
 
 	log.Println(strings.Repeat("#", 30))
@@ -52,7 +51,8 @@ func ExampleOpen() {
 }
 
 func ExampleCurrentSchema() {
-	connStr := "DSN = sample; CurrentSchema = SYSIBM"
+	connStr := getConStr()
+	connStr += " CurrentSchema = SYSIBM;"
 	qry := "Select 100 from systables fetch first 1 row only"
 
 	log.Println(strings.Repeat("#", 30))
@@ -73,7 +73,7 @@ func ExampleCurrentSchema() {
 }
 
 func ExampleProc() {
-	connStr := "DSN = sample"
+	connStr := getConStr()
 	var (
 		snapTime   time.Time
 		dbsize     int64
@@ -100,16 +100,22 @@ func ExampleLoad() {
 	tabname := "loadtable"
 	createStmt := fmt.Sprintf("CREATE TABLE %s (Col1 VARCHAR(30))", tabname)
 	dropStmt := fmt.Sprintf("DROP TABLE %s", tabname)
-	connStr := "SQLConnect; Database = Sample;"
+	connStr := getConStr()
+	tmpflName := "_TEST/test.del"
 
 	log.Println(strings.Repeat("#", 30))
 	log.Println("Shows how to load a table using SYSPROC.ADMIN_CMD and the \"cli\" driver.")
 
-	tmpflName := prepData(tabname)
+	if home := os.Getenv("DATABASE_HOMEDIR"); home == "" {
+		log.Println("DATABASE_HOMEDIR is not set; skipping ExampleLoad")
+		return
+	} else {
+		tmpflName = home + "/" + tmpflName
+
+	}
 
 	db, err := sql.Open("cli", connStr)
 	checkError(err)
-	defer os.Remove(tmpflName)
 	defer db.Close()
 
 	// setup
@@ -175,25 +181,35 @@ func ExampleLoad() {
 	checkError(err)
 }
 
-func prepData(filePrefix string) string {
-	wContents := []byte("Hello\nWorld\n")
-
-	tmpfile, err := ioutil.TempFile("", filePrefix)
-	checkError(err)
-
-	// write sample data for loading
-	_, err = tmpfile.Write(wContents)
-	checkError(err)
-
-	// close filehandler
-	err = tmpfile.Close()
-	checkError(err)
-
-	return tmpfile.Name()
-}
-
 func checkError(err error) {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func getConStr() string {
+	config := struct {
+		database string
+		uid      string
+		pwd      string
+	}{
+		database: "sample",
+		uid:      "",
+		pwd:      "",
+	}
+
+	if name := os.Getenv("DATABASE_NAME"); name != "" {
+		config.database = name
+	}
+
+	if user := os.Getenv("DATABASE_USER"); user != "" {
+		config.uid = user
+	}
+
+	if pass := os.Getenv("DATABASE_PASSWORD"); pass != "" {
+		config.pwd = pass
+	}
+
+	return fmt.Sprintf("DATABASE = %s; UID = %s; PWD = %s;",
+		config.database, config.uid, config.pwd)
 }
