@@ -11,21 +11,23 @@
 * Pull the db2server image.
 * Use the following .env_list:
 
-> LICENSE=accept
-> DB2INSTANCE=db2inst1
-> DB2INST1_PASSWORD=password
-> DBNAME=
-> BLU=false
-> ENABLE_ORACLE_COMPATIBILITY=false
-> UPDATEAVAIL=NO
-> TO_CREATE_SAMPLEDB=true
-> REPODB=false
-> IS_OSXFS=false
-> PERSISTENT_HOME=true
-> HADR_ENABLED=false
-> ETCD_ENDPOINT=
-> ETCD_USERNAME=
-> ETCD_PASSWORD=
+```
+  LICENSE=accept  
+  DB2INSTANCE=db2inst1  
+  DB2INST1_PASSWORD=password  
+  DBNAME=  
+  BLU=false  
+  ENABLE_ORACLE_COMPATIBILITY=false  
+  UPDATEAVAIL=NO  
+  TO_CREATE_SAMPLEDB=true  
+  REPODB=false  
+  IS_OSXFS=false  
+  PERSISTENT_HOME=true  
+  HADR_ENABLED=false  
+  ETCD_ENDPOINT=  
+  ETCD_USERNAME=  
+  ETCD_PASSWORD=  
+```
 
 * Use `docker run` to setup `db2server` image:
 
@@ -51,15 +53,15 @@ fi
 will be setting up Db2 instance and the sample database.
 * Once the `db2server` setup is complete, copy `_TEST` directory from `github.com/asifjalil/cli`
 to `db2inst1` id's home directory on `db2server` Docker image:
-> docker exec -ti db2server bash -c "su - db2inst1"
-> scp -r <username>@<server ip>:<dir>/_TEST .
-> * <username> is the id that owns `github.com/asifjalil/cli` files
-> * <server ip> is the ip address of the server with the source code
-> * <dir> is the directory where `_TEST` directory is located
->
-> cd $HOME/_TEST
-> db2 "connect to sample"
-> db2 -tf sleep_proc.sql
+> docker exec -ti db2server bash -c "su - db2inst1"  
+> scp -r <username>@<server ip>:<dir>/_TEST .  
+> * <username> is the id that owns `github.com/asifjalil/cli` files  
+> * <server ip> is the ip address of the server with the source code  
+> * <dir> is the directory where `_TEST` directory is located  
+>  
+> cd $HOME/_TEST  
+> db2 "connect to sample"  
+> db2 -tf sleep_proc.sql  
 
 ## Setup Db2 Driver
 * This Go Db2 driver `cli` underneath uses _IBM DB2 ODBC/CLI
