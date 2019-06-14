@@ -2,7 +2,7 @@
 
 To test this _Go Driver_ we need the following:  
 * Download `github.com/asifjalil/cli` source code on a server.
-* Setup a sample Db2 database using docker.  
+* Setup a sample Db2 database using Docker.  
 * Copy the `_TEST` directory from the source code to the Db2 Docker instance.  
 * Download and setup Db2 ODBC/CLI driver where the source code is located.   
 * Run tests from the source code.  

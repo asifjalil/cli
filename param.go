@@ -12,24 +12,20 @@ import (
 	"unsafe"
 )
 
-// param is for input type parameter only.
-// param is used to store the following:
-// - a reference to the buffer that holds
-//   the input value
-// - length of the input value
-//
-// We do this so Go GC doesn't remove the
-// buffer between bind and execution.
-// See issue #12
 type param struct {
-	plen  *C.SQLLEN
-	buf   unsafe.Pointer
+	// buf points to driver.Value.
+	buf unsafe.Pointer
+	// plen is the buf length.
+	plen *C.SQLLEN
+	// inout is a special case driver.Value.
+	// When driver.Value is of type sql.Out
+	// it requires some extra processing.
 	inout *out
 }
 
 // bindParam binds a driver.Value (Go value) to a parameter marker in an SQL statement.
 // That bound value is returned as *param. Go code needs to keep a reference to
-// to this bound value so Go GC won't remove it.
+// to this bound value so Go GC won't remove it before SQLExecute is called.
 func bindParam(s *stmt, idx int, v driver.Value) (*param, error) {
 	var (
 		ctype, sqltype, decimal C.SQLSMALLINT
