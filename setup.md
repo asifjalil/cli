@@ -53,15 +53,15 @@ fi
 will be setting up Db2 instance and the sample database.
 * Once the `db2server` setup is complete, copy `_TEST` directory from `github.com/asifjalil/cli`
 to `db2inst1` id's home directory on `db2server` Docker image:
-> docker exec -ti db2server bash -c "su - db2inst1"  
-> scp -r <username>@<server ip>:<dir>/_TEST .  
+> $ `docker exec -ti db2server bash -c "su - db2inst1"`  
+> $ `scp -r <username>@<server ip>:<dir>/_TEST .`  
 > * <username> is the id that owns `github.com/asifjalil/cli` files  
 > * <server ip> is the ip address of the server with the source code  
 > * <dir> is the directory where `_TEST` directory is located  
 >  
-> cd $HOME/_TEST  
-> db2 "connect to sample"  
-> db2 -tf sleep_proc.sql  
+> $ `cd $HOME/_TEST`  
+> $ `db2 "connect to sample"`  
+> $ `db2 -tf sleep_proc.sql`  
 
 ## Setup Db2 Driver
 * This Go Db2 driver `cli` underneath uses _IBM DB2 ODBC/CLI
