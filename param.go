@@ -141,7 +141,6 @@ func bindParam(s *stmt, idx int, v driver.Value) (*param, error) {
 		}
 		buflen = inout.buflen
 		plen = inout.plen
-		//s.outs = append(s.outs, o)
 	default:
 		return nil, fmt.Errorf("database/sql/driver: [asifjalil][CLI Driver]: unsupported bind param. type %T at index %d", v, idx+1)
 	}

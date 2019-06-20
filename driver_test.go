@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"os"
 	"reflect"
 	"strings"
@@ -32,6 +33,7 @@ func getDB2Error(sqlerr error) (int, string, bool) {
 
 	return 0, "", false
 }
+
 func newTestDB() (*testDB, error) {
 	config := struct {
 		database string
@@ -87,10 +89,10 @@ func TestScan(t *testing.T) {
 		&s2, &i1, &f1)
 	switch {
 	case err != nil:
-		warn(t, "error: %v", err)
+		die(t, "error: %v", err)
 	case s1 != "hello" || s2.String != "" || i1 != 12345 ||
 		f1 != 12345.6789:
-		warn(t, "Expected: s1:\"hello\", s2:\"\", i1: 12345, f1: 12345.6789|Got: s1:%s, s2:%s, i1: %d, f1: %f",
+		die(t, "Expected: s1:\"hello\", s2:\"\", i1: 12345, f1: 12345.6789|Got: s1:%s, s2:%s, i1: %d, f1: %f",
 			s1, s2.String, i1, f1)
 	default:
 		info(t, "All Ok!")
@@ -118,13 +120,13 @@ func TestTimeStamp(t *testing.T) {
 	_, err = tx.Exec(`INSERT INTO in_tray(received, source, subject, note_text) 
 		VALUES(?, ?, ?, ?)`, ts, "TEST", nil, nil)
 	if err != nil {
-		warn(t, "insert failed because %v", err)
+		die(t, "insert failed because %v", err)
 	}
 
 	_, err = tx.ExecContext(context.Background(), `INSERT INTO in_tray(received, source, subject, note_text) 
 		VALUES(?, ?, ?, ?)`, ts, "TEST", nil, nil)
 	if err != nil {
-		warn(t, "insert failed because %v", err)
+		die(t, "insert failed because %v", err)
 	}
 
 	// check that the data is in the table
@@ -134,9 +136,9 @@ func TestTimeStamp(t *testing.T) {
 
 	switch {
 	case err == sql.ErrNoRows:
-		warn(t, "No new timestamp in table IN_TRAY - insert didn't work")
+		die(t, "No new timestamp in table IN_TRAY - insert didn't work")
 	case err != nil:
-		warn(t, "insert into IN_TRAY failed because %v", err)
+		die(t, "insert into IN_TRAY failed because %v", err)
 	default:
 		// Timestamps are stored as is but without the timezone information.
 		// When a timestamp is returned from the database, the driver/Go assumes
@@ -152,14 +154,14 @@ func TestTimeStamp(t *testing.T) {
 			db_ts.Nanosecond(),
 			time.UTC)
 		if !ts.Equal(db_ts) {
-			warn(t, "Expected: %v| Got: %v", ts, db_ts)
+			die(t, "Expected: %v| Got: %v", ts, db_ts)
 		}
 	}
 
 	// cleanup
 	err = tx.Rollback()
 	if err != nil {
-		warn(t, "rollback failed because %v", err)
+		die(t, "rollback failed because %v", err)
 	}
 }
 
@@ -258,9 +260,9 @@ func TestLgXML(t *testing.T) {
 	gotXML += "\n"
 	switch {
 	case err == sql.ErrNoRows:
-		warn(t, "Expected 1 row; Found 0")
+		die(t, "Expected 1 row; Found 0")
 	case err != nil:
-		warn(t, "error: %v", err)
+		die(t, "error: %v", err)
 	case wantXML != gotXML:
 		ioutil.WriteFile("want_xml.txt", []byte(wantXML), 0644)
 		ioutil.WriteFile("got_xml.txt", []byte(gotXML), 0644)
@@ -502,23 +504,58 @@ func TestDecFloat(t *testing.T) {
 	}
 	defer db.close()
 
-	var n sql.NullFloat64
-	decFloats := []sql.NullFloat64{
-		{Float64: 0, Valid: false}, // null decfloat
-		{Float64: 0.0, Valid: true},
-		{Float64: 0.1, Valid: true},
-		{Float64: -0.1, Valid: true},
-		{Float64: 1.999999, Valid: true},
-		{Float64: -1.999999, Valid: true},
+	tests := []struct {
+		name string
+		val  sql.NullString // need to use string to pass smallest/larget decfloat
+		want sql.NullFloat64
+	}{
+		{
+			name: "null value",
+			val:  sql.NullString{String: "", Valid: false},
+			want: sql.NullFloat64{Float64: 0, Valid: false},
+		},
+		{
+			name: "zero value",
+			val:  sql.NullString{String: "0.0", Valid: true},
+			want: sql.NullFloat64{Float64: 0.0, Valid: true},
+		},
+		{
+			name: "negative zero value",
+			val:  sql.NullString{String: "-0.0", Valid: true},
+			want: sql.NullFloat64{Float64: -0.0, Valid: true},
+		},
+		{
+			name: "smallest positive",
+			val:  sql.NullString{String: "5e-324", Valid: true},
+			want: sql.NullFloat64{Float64: math.SmallestNonzeroFloat64, Valid: true},
+		},
+		{
+			name: "largest positive",
+			val:  sql.NullString{String: "1.7976931348623157e+308", Valid: true},
+			want: sql.NullFloat64{Float64: math.MaxFloat64, Valid: true},
+		},
+		{
+			name: "smallest negative",
+			val:  sql.NullString{String: "-5e-324", Valid: true},
+			want: sql.NullFloat64{Float64: -math.SmallestNonzeroFloat64, Valid: true},
+		},
+		{
+			name: "largest negative",
+			val:  sql.NullString{String: "-1.7976931348623157e+308", Valid: true},
+			want: sql.NullFloat64{Float64: -math.MaxFloat64, Valid: true},
+		},
 	}
-	for _, df := range decFloats {
-		err = db.QueryRow("VALUES (CAST (? AS DECFLOAT))", df).Scan(&n)
-		if err != nil {
-			t.Fatal(err, ". For decfloat value: ", df)
-		}
-		if !reflect.DeepEqual(df, n) {
-			t.Errorf("Wanted %v, got %v\n", df, n)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got sql.NullFloat64
+			err := db.QueryRow("VALUES (CAST (? AS DECFLOAT))", tt.val).Scan(&got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(tt.want, got) {
+				t.Errorf("want %f, got %f", tt.want.Float64, got.Float64)
+			}
+		})
 	}
 }
 
@@ -529,23 +566,88 @@ func TestInt(t *testing.T) {
 	}
 	defer db.close()
 
-	var n sql.NullInt64
-	ints := []sql.NullInt64{
-		{Int64: 0, Valid: false}, // null int
-		{Int64: 0, Valid: true},
-		{Int64: 1, Valid: true},
-		{Int64: -1, Valid: true},
-		{Int64: 999999, Valid: true},
-		{Int64: 999999, Valid: true},
+	tests := []struct {
+		name string
+		want sql.NullInt64
+	}{
+		{
+			name: "null value",
+			want: sql.NullInt64{Int64: 0, Valid: false},
+		},
+		{
+			name: "zero value",
+			want: sql.NullInt64{Int64: 0, Valid: true},
+		},
+		{
+			name: "negative zero value",
+			want: sql.NullInt64{Int64: -0, Valid: true},
+		},
+		{
+			name: "smallest",
+			want: sql.NullInt64{Int64: -2147483648, Valid: true},
+		},
+		{
+			name: "largest",
+			want: sql.NullInt64{Int64: 2147483647, Valid: true},
+		},
 	}
-	for _, i := range ints {
-		err = db.QueryRow("VALUES (CAST (? AS INT))", i).Scan(&n)
-		if err != nil {
-			t.Fatal(err, ". For int value: ", i)
-		}
-		if !reflect.DeepEqual(i, n) {
-			t.Errorf("Wanted %v, got %v\n", i, n)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got sql.NullInt64
+			err := db.QueryRow("VALUES (CAST (? AS INT))", tt.want).Scan(&got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(tt.want, got) {
+				t.Errorf("wanted %v, got %v", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestBigInt(t *testing.T) {
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	tests := []struct {
+		name string
+		want sql.NullInt64
+	}{
+		{
+			name: "null value",
+			want: sql.NullInt64{Int64: 0, Valid: false},
+		},
+		{
+			name: "zero value",
+			want: sql.NullInt64{Int64: 0, Valid: true},
+		},
+		{
+			name: "negative zero value",
+			want: sql.NullInt64{Int64: -0, Valid: true},
+		},
+		{
+			name: "smallest",
+			want: sql.NullInt64{Int64: -9223372036854775808, Valid: true},
+		},
+		{
+			name: "largest",
+			want: sql.NullInt64{Int64: 9223372036854775807, Valid: true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got sql.NullInt64
+			err := db.QueryRow("VALUES (CAST (? AS BIGINT))", tt.want).Scan(&got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(tt.want, got) {
+				t.Errorf("wanted %v, got %v", tt.want, got)
+			}
+		})
 	}
 }
 
@@ -565,26 +667,41 @@ func TestString(t *testing.T) {
 		db.Exec("DROP TABLE STRINGS")
 	}()
 
-	testStrings := []sql.NullString{
-		{String: "", Valid: false},              // null string
-		{String: "", Valid: true},               // empty string
-		{String: "Hello, 世界", Valid: true},      // unicode string
-		{String: "289-46-8832-AB", Valid: true}, // alphanumeric string
+	tests := []struct {
+		name string
+		want sql.NullString
+	}{
+		{
+			name: "null value",
+			want: sql.NullString{String: "", Valid: false},
+		},
+		{
+			name: "empty value",
+			want: sql.NullString{String: "", Valid: true},
+		},
+		{
+			name: "unicode value",
+			want: sql.NullString{String: "Hello, 世界", Valid: true},
+		},
+		{
+			name: "alphanumeric value",
+			want: sql.NullString{String: " 289-46-8832 AB ", Valid: true},
+		},
 	}
-	var myString sql.NullString
-	for _, testString := range testStrings {
-
-		err = db.QueryRow(`SELECT DECRYPT_CHAR(COL1, ?) FROM FINAL TABLE (
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got sql.NullString
+			err := db.QueryRow(`SELECT DECRYPT_CHAR(COL1, ?) FROM FINAL TABLE (
 			INSERT INTO STRINGS VALUES ENCRYPT(?, ?)
-		)`, password, testString, password).Scan(&myString)
-		if err != nil {
-			t.Fatal(err)
-		}
+		)`, password, tt.want, password).Scan(&got)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-		t.Logf("%v => %v\n", testString, myString)
-		if !reflect.DeepEqual(testString, myString) {
-			t.Errorf("Expected %v, got %v\n", testString, myString)
-		}
+			if !reflect.DeepEqual(tt.want, got) {
+				t.Errorf("wanted %q, got %q\n", tt.want.String, got.String)
+			}
+		})
 	}
 }
 
@@ -665,28 +782,47 @@ func TestVarBinary(t *testing.T) {
 		db.Exec("DROP TABLE binaries")
 	}()
 
-	test := []NullByte{
-		{Byte: nil, Valid: false},                // nil varbinary
-		{Byte: []byte(""), Valid: true},          // empty varbinary
-		{Byte: []byte("myhint"), Valid: true},    // regular varbinary
-		{Byte: []byte("Hello, 世界"), Valid: true}, // unicode varbinary
+	tests := []struct {
+		name string
+		want NullByte
+	}{
+		{
+			name: "null varbinary",
+			want: NullByte{Byte: nil, Valid: false},
+		},
+		{
+			name: "empty varbinary",
+			want: NullByte{Byte: []byte(""), Valid: true},
+		},
+		{
+			name: "regular varbinary",
+			want: NullByte{Byte: []byte("myhint\t"), Valid: true},
+		},
+		{
+			name: "unicode varbinary",
+			want: NullByte{Byte: []byte("Hello, 世界 \n"), Valid: true},
+		},
 	}
 
-	var pwhash sql.NullString
-	for _, hint := range test {
-		err = db.QueryRow(`SELECT HEX(PASSWORDHASH) FROM FINAL TABLE
-	(INSERT INTO binaries (NAME, PASSWORDHASH) VALUES (?, ?))`, "ABCD", hint).Scan(&pwhash)
-		if err != nil {
-			t.Error(err)
-		}
-		decoded, err := hex.DecodeString(pwhash.String)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("%v => %v\n", hint.Byte, decoded)
-		if string(hint.Byte) != string(decoded) {
-			t.Errorf("Expected %s, got %s\n", hint.Byte, decoded)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got sql.NullString
+			err := db.QueryRow(`SELECT HEX(PASSWORDHASH) FROM FINAL TABLE
+	(INSERT INTO binaries (NAME, PASSWORDHASH) VALUES (?, ?))`, "ABCD", tt.want).Scan(&got)
+			if err != nil {
+				t.Error(err)
+			}
+			decoded, err := hex.DecodeString(got.String)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(tt.want.Byte) != string(decoded) {
+				t.Errorf("want %q, got %q\n", tt.want.Byte, decoded)
+			} else {
+				t.Logf("want %q, got %q\n", tt.want.Byte, decoded)
+			}
+
+		})
 	}
 }
 
@@ -711,7 +847,7 @@ func TestSPInOut(t *testing.T) {
 	 `
 	callSp := "call test_inout(?)"
 	dropSp := "drop procedure test_inout"
-	testCases := []struct {
+	tests := []struct {
 		paramType string
 		want      sql.Out
 		got       sql.Out
@@ -839,30 +975,33 @@ func TestSPInOut(t *testing.T) {
 		},
 	}
 
-	for i, tc := range testCases {
-		// create the SP
-		_, err = db.Exec(fmt.Sprintf(createSp, tc.paramType))
-		if err != nil {
-			die(t, "testcase #%d: paramType %v failed because %v\n", i, tc.paramType, err)
-		}
+	for _, tt := range tests {
+		t.Run(tt.paramType, func(t *testing.T) {
+			paramType, want, got := tt.paramType, tt.want, tt.got
+			// create the SP
+			_, err := db.Exec(fmt.Sprintf(createSp, paramType))
+			if err != nil {
+				die(t, "%v", err)
+			}
 
-		// call the SP
-		_, err = db.Exec(callSp, tc.got)
-		if err != nil {
-			die(t, "testcase #%d: paramType %v failed because %v\n", i, tc.paramType, err)
-		}
+			// call the SP
+			_, err = db.Exec(callSp, got)
+			if err != nil {
+				die(t, "%v", err)
+			}
 
-		// drop the SP
-		_, err = db.Exec(dropSp)
-		if err != nil {
-			die(t, "Failed to run %v because %v", dropSp, err)
-		}
+			// drop the SP
+			_, err = db.Exec(dropSp)
+			if err != nil {
+				die(t, "%v", err)
+			}
 
-		if !reflect.DeepEqual(tc.want, tc.got) {
-			warn(t, "testcase #%d: paramType: %v: Want %v: Got %v\n", i, tc.paramType, tc.want, tc.got)
-		} else {
-			info(t, "testcase #%d: paramType: %v: Got %v\n", i, tc.paramType, tc.got.Dest)
-		}
+			if !reflect.DeepEqual(want, got) {
+				die(t, "want %v, got %v\n", want, got)
+			} else {
+				info(t, "want %v, got %v\n", want, got)
+			}
+		})
 	}
 }
 
@@ -886,7 +1025,7 @@ func TestSPStringInOut(t *testing.T) {
 	callSp := "call test_inout(?)"
 	dropSp := "drop procedure test_inout"
 
-	testCases := []struct {
+	tests := []struct {
 		paramType string
 		want      string
 		inout     sql.Out
@@ -903,36 +1042,38 @@ func TestSPStringInOut(t *testing.T) {
 		},
 	}
 
-	for i, tc := range testCases {
-		// create the SP
-		_, err = db.Exec(fmt.Sprintf(createSp, tc.paramType))
-		if err != nil {
-			die(t, "Failed to run %v because %v\n", createSp, err)
-		}
-
-		// call the SP
-		_, err = db.Exec(callSp, tc.inout)
-		if err != nil {
-			die(t, "testcase #%d: paramType %s failed because %v\n", i, tc.paramType, err)
-		}
-
-		// drop the SP
-		_, err = db.Exec(dropSp)
-		if err != nil {
-			die(t, "Failed to run %v because %v\n", dropSp, err)
-		}
-
-		switch g := tc.inout.Dest.(type) {
-		case *sql.NullString:
-			if (*g).String != tc.want {
-				warn(t, "testcase #%d: paramType: %s: Want %s, Got %s\n",
-					i, tc.paramType, tc.want, (*g).String)
-			} else {
-				info(t, "Got: %#v\n", *g)
+	for _, tt := range tests {
+		t.Run(tt.paramType, func(t *testing.T) {
+			paramType, want, inout := tt.paramType, tt.want, tt.inout
+			// create the SP
+			_, err := db.Exec(fmt.Sprintf(createSp, paramType))
+			if err != nil {
+				die(t, "Failed to run %v because %v", createSp, err)
 			}
-		default:
-			warn(t, "Unknown type %T\n", g)
-		}
+
+			// call the SP
+			_, err = db.Exec(callSp, inout)
+			if err != nil {
+				die(t, "%v", err)
+			}
+
+			// drop the SP
+			_, err = db.Exec(dropSp)
+			if err != nil {
+				die(t, "%v", err)
+			}
+
+			switch g := inout.Dest.(type) {
+			case *sql.NullString:
+				if (*g).String != want {
+					die(t, "want %q, got %q\n", want, (*g).String)
+				} else {
+					info(t, "want %q, got %q\n", want, (*g).String)
+				}
+			default:
+				die(t, "Unknown type %T\n", g)
+			}
+		})
 	}
 }
 
@@ -1156,12 +1297,6 @@ func info(t *testing.T, format string, a ...interface{}) {
 	logf(t, fmt.Sprintf("%-10s", "ok")+format, a...)
 }
 
-func warn(t *testing.T, format string, a ...interface{}) {
-	logf(t, fmt.Sprintf("%-10s", "---FAIL:")+format, a...)
-	t.Fail()
-}
-
 func die(t *testing.T, format string, a ...interface{}) {
-	logf(t, fmt.Sprintf("%-10s", "---FAIL:")+format, a...)
-	t.FailNow()
+	t.Errorf(fmt.Sprintf("%-10s", "---FAIL:")+format, a...)
 }
