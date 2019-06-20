@@ -497,6 +497,68 @@ func TestTxContext(t *testing.T) {
 	tx.Commit()
 }
 
+func TestDouble(t *testing.T) {
+	db, err := newTestDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+
+	tests := []struct {
+		name string
+		val  sql.NullString // need to use string to pass smallest/larget double
+		want sql.NullFloat64
+	}{
+		{
+			name: "null value",
+			val:  sql.NullString{String: "", Valid: false},
+			want: sql.NullFloat64{Float64: 0, Valid: false},
+		},
+		{
+			name: "zero value",
+			val:  sql.NullString{String: "0.0", Valid: true},
+			want: sql.NullFloat64{Float64: 0.0, Valid: true},
+		},
+		{
+			name: "negative zero value",
+			val:  sql.NullString{String: "-0.0", Valid: true},
+			want: sql.NullFloat64{Float64: -0.0, Valid: true},
+		},
+		{
+			name: "smallest positive",
+			val:  sql.NullString{String: "+2.225E-307", Valid: true},
+			want: sql.NullFloat64{Float64: +2.225E-307, Valid: true},
+		},
+		{
+			name: "largest positive",
+			val:  sql.NullString{String: "+1.79769E+308", Valid: true},
+			want: sql.NullFloat64{Float64: +1.79769E+308, Valid: true},
+		},
+		{
+			name: "smallest negative",
+			val:  sql.NullString{String: "-1.79769E+308", Valid: true},
+			want: sql.NullFloat64{Float64: -1.79769E+308, Valid: true},
+		},
+		{
+			name: "largest negative",
+			val:  sql.NullString{String: "-2.225E-307", Valid: true},
+			want: sql.NullFloat64{Float64: -2.225E-307, Valid: true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got sql.NullFloat64
+			err := db.QueryRow("VALUES (CAST (? AS DOUBLE))", tt.val).Scan(&got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(tt.want, got) {
+				t.Errorf("want %f, got %f", tt.want.Float64, got.Float64)
+			}
+		})
+	}
+}
+
 func TestDecFloat(t *testing.T) {
 	db, err := newTestDB()
 	if err != nil {
