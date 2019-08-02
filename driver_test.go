@@ -60,6 +60,10 @@ func newTestDB() (*testDB, error) {
 	connStr := fmt.Sprintf("DATABASE = %s; UID = %s; PWD = %s;",
 		config.database, config.uid, config.pwd)
 
+	if os.Getenv("DATABASE_DSN") != "" {
+		connStr = os.Getenv("DATABASE_DSN")
+	}
+
 	db, err := sql.Open("cli", connStr)
 	if err != nil {
 		return nil, err
@@ -1349,6 +1353,53 @@ func TestOverflow(t *testing.T) {
 	}
 
 	info(t, "values: %+v err: %+v", values, rows.Err())
+}
+
+func TestConnError(t *testing.T) {
+	db, err := newTestDB()
+	if err != nil {
+		die(t, "Failed to connect to db: %v", err)
+	}
+	defer db.Close()
+
+	fmt.Println("connected to db")
+	query := "select current timestamp from sysibm.sysdummy1"
+	now := time.Time{}
+
+	// verify
+	err = db.QueryRow(query).Scan(&now)
+	if err != nil {
+		die(t, "%+v", err)
+	}
+	fmt.Printf("%v\n", now)
+	fmt.Printf("%+v\n", db.Stats())
+
+	fmt.Printf("Testing failure, stop the database\n")
+	for err == nil {
+		err = db.QueryRow(query).Scan(&now)
+		if err != nil {
+			fmt.Printf("found error: %s\n", err.Error())
+			break
+		} else {
+			fmt.Printf("%v\n", now)
+			fmt.Printf("%+v\n", db.Stats())
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	fmt.Printf("Testing recovery, restart the database\n")
+	for err != nil {
+		err = db.QueryRow(query).Scan(&now)
+		if err == nil {
+			fmt.Printf("%v\n", now)
+			fmt.Printf("%+v\n", db.Stats())
+			break
+		}
+		fmt.Printf("found error: %s\n", err.Error())
+		fmt.Printf("%+v\n", db.Stats())
+		time.Sleep(2 * time.Second)
+	}
+
 }
 
 func logf(t *testing.T, format string, a ...interface{}) {
