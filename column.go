@@ -64,7 +64,7 @@ loop:
 			break loop
 		case C.SQL_SUCCESS_WITH_INFO:
 			err := formatError(C.SQL_HANDLE_STMT, C.SQLHANDLE(c.h))
-			if err.SQLState() != "01004" {
+			if cliErr, ok := err.(*cliError); !ok || cliErr.SQLState() != "01004" {
 				return nil, err
 			}
 			// buf is not big enough; data has been truncated

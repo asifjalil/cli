@@ -5,6 +5,7 @@ package cli
 */
 import "C"
 import (
+	"database/sql/driver"
 	"fmt"
 	"strings"
 	"unsafe"
@@ -42,12 +43,12 @@ func success(ret C.SQLRETURN) bool {
 	return int(ret) == C.SQL_SUCCESS || int(ret) == C.SQL_SUCCESS_WITH_INFO
 }
 
-func formatError(ht C.SQLSMALLINT, h C.SQLHANDLE) (err *cliError) {
+func formatError(ht C.SQLSMALLINT, h C.SQLHANDLE) error {
 	sqlState := make([]uint16, 6)
 	var sqlCode C.SQLINTEGER
 	messageText := make([]uint16, C.SQL_MAX_MESSAGE_LENGTH)
 	var textLength C.SQLSMALLINT
-	err = &cliError{}
+	err := &cliError{}
 	for i := 1; ; i++ {
 		ret := C.SQLGetDiagRecW(C.SQLSMALLINT(ht),
 			h,
@@ -69,6 +70,15 @@ func formatError(ht C.SQLSMALLINT, h C.SQLHANDLE) (err *cliError) {
 	}
 	if err.message != "" {
 		err.message = strings.TrimSpace(err.message)
+	}
+
+	// https://www.ibm.com/support/knowledgecenter/en/SSEPGG_11.1.0/com.ibm.db2.luw.messages.cli.doc/com.ibm.db2.luw.messages.cli.doc-gentopic1.html
+	if strings.Contains(err.message, "CLI0106E") ||
+		strings.Contains(err.message, "CLI0107E") ||
+		strings.Contains(err.message, "CLI0108E") ||
+		// http://www-01.ibm.com/support/docview.wss?uid=swg21164785
+		strings.Contains(err.message, "SQL30081N") {
+		return driver.ErrBadConn
 	}
 
 	return err
