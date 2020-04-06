@@ -40,7 +40,7 @@ func (e *cliError) Error() string {
 }
 
 func success(ret C.SQLRETURN) bool {
-	return int(ret) == C.SQL_SUCCESS || int(ret) == C.SQL_SUCCESS_WITH_INFO
+	return int(ret) == C.SQL_SUCCESS
 }
 
 func formatError(ht C.SQLSMALLINT, h C.SQLHANDLE) error {
