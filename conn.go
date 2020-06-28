@@ -134,7 +134,14 @@ func (c *conn) PrepareContext(ctx context.Context, sql string) (driver.Stmt, err
 
 	ret = C.SQLPrepareW(C.SQLHSTMT(hstmt),
 		(*C.SQLWCHAR)(unsafe.Pointer(wsql)), C.SQL_NTS)
-	if !success(ret) {
+
+	// Accept warning during SQLPrepare because the following is a warning
+	// but we can still proceed:
+	//
+	// SQLSTATE 01504 - The UPDATE or DELETE statement does not include a
+	// WHERE clause.
+	//
+	if !(int(ret) == C.SQL_SUCCESS || int(ret) == C.SQL_SUCCESS_WITH_INFO) {
 		err := formatError(C.SQL_HANDLE_STMT, hstmt)
 		C.SQLFreeHandle(C.SQL_HANDLE_STMT, hstmt)
 		return nil, err
