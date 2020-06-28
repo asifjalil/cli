@@ -93,10 +93,22 @@
 // See `example_test.go`.
 package cli
 
+// Adding new C function based on alexbrainman's odbc driver.
+// https://github.com/alexbrainman/odbc/blob/master/api/api_unix.go
+// This is so we pass -d=checkptr.
+
 /*
 #cgo LDFLAGS: -ldb2
 
+#include <stdint.h>
 #include <sqlcli1.h>
+
+SQLRETURN sqlSetEnvUIntPtrAttr(SQLHENV environmentHandle, SQLINTEGER attribute, uintptr_t valuePtr, SQLINTEGER stringLength) {
+    return SQLSetEnvAttr(environmentHandle, attribute, (SQLPOINTER)valuePtr, stringLength);
+}
+SQLRETURN sqlSetConnectUIntPtrAttr(SQLHDBC connectionHandle, SQLINTEGER attribute, uintptr_t valuePtr, SQLINTEGER stringLength) {
+    return SQLSetConnectAttr(connectionHandle, attribute, (SQLPOINTER)valuePtr, stringLength);
+}
 */
 import "C"
 
@@ -143,9 +155,9 @@ func initDriver() error {
 	}
 
 	//use ODBC v3
-	ret = C.SQLSetEnvAttr(C.SQLHENV(drv.henv),
+	ret = sqlSetEnvUIntPtrAttr(C.SQLHENV(drv.henv),
 		C.SQL_ATTR_ODBC_VERSION,
-		C.SQLPOINTER(uintptr(C.SQL_OV_ODBC3)), 0)
+		uintptr(C.SQL_OV_ODBC3), 0)
 
 	if !success(ret) {
 		defer C.SQLFreeHandle(C.SQL_HANDLE_ENV, drv.henv)
@@ -163,4 +175,12 @@ func init() {
 	sql.Register("cli", &drv)
 }
 
-// Adding signed commit
+func sqlSetEnvUIntPtrAttr(environmentHandle C.SQLHENV, attribute C.SQLINTEGER, valuePtr uintptr, stringLength C.SQLINTEGER) (ret C.SQLRETURN) {
+	r := C.sqlSetEnvUIntPtrAttr(C.SQLHENV(environmentHandle), C.SQLINTEGER(attribute), C.uintptr_t(valuePtr), C.SQLINTEGER(stringLength))
+	return C.SQLRETURN(r)
+}
+
+func sqlSetConnectUIntPtrAttr(connectionHandle C.SQLHDBC, attribute C.SQLINTEGER, valuePtr uintptr, stringLength C.SQLINTEGER) (ret C.SQLRETURN) {
+	r := C.sqlSetConnectUIntPtrAttr(C.SQLHDBC(connectionHandle), C.SQLINTEGER(attribute), C.uintptr_t(valuePtr), C.SQLINTEGER(stringLength))
+	return C.SQLRETURN(r)
+}

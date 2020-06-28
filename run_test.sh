@@ -1,7 +1,7 @@
 #!/bin/bash
 
 testname=$1
-goTest="go test"
+goTest="go test -gcflags=all=-d=checkptr"
 
 if [[ ! -z "$testname" ]]; then
     goTest="$goTest -run $testname"

@@ -218,7 +218,8 @@ func (o *out) value() (driver.Value, error) {
 		if p == nil {
 			return nil, nil
 		}
-		s := (*[1 << 20]uint16)(p)[:len(buf)/2]
+		s := (*[1 << 28]uint16)(p)[: len(buf)/2 : len(buf)/2]
+		// s := (*[1 << 20]uint16)(p)[:len(buf)/2]
 		return utf16ToUTF8(s), nil
 	case C.SQL_C_TYPE_TIMESTAMP:
 		t := (*sql_TIMESTAMP_STRUCT)(p)

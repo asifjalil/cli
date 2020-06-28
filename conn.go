@@ -178,8 +178,8 @@ func (c *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 
 	// Set ReadOnly
 	if opts.ReadOnly {
-		ret := C.SQLSetConnectAttr(C.SQLHDBC(c.hdbc), C.SQL_ATTR_ACCESS_MODE,
-			C.SQLPOINTER(uintptr(C.SQL_MODE_READ_ONLY)), C.SQL_IS_INTEGER)
+		ret := sqlSetConnectUIntPtrAttr(C.SQLHDBC(c.hdbc), C.SQL_ATTR_ACCESS_MODE,
+			uintptr(C.SQL_MODE_READ_ONLY), C.SQL_IS_INTEGER)
 		if !success(ret) {
 			return nil, formatError(C.SQL_HANDLE_STMT, c.hdbc)
 		}
@@ -225,8 +225,8 @@ func (c *conn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, e
 
 // Turns autocommit on and off for a connection.
 func (c *conn) setAutoCommitAttr(a uintptr) error {
-	ret := C.SQLSetConnectAttr(C.SQLHDBC(c.hdbc), C.SQL_ATTR_AUTOCOMMIT,
-		C.SQLPOINTER(a), C.SQL_IS_UINTEGER)
+	ret := sqlSetConnectUIntPtrAttr(C.SQLHDBC(c.hdbc), C.SQL_ATTR_AUTOCOMMIT,
+		a, C.SQL_IS_UINTEGER)
 	if !success(ret) {
 		return formatError(C.SQL_HANDLE_STMT, c.hdbc)
 	}
@@ -235,8 +235,8 @@ func (c *conn) setAutoCommitAttr(a uintptr) error {
 
 // Sets Isolation Level for a connection
 func (c *conn) setIsolationLevel(a uintptr) error {
-	ret := C.SQLSetConnectAttr(C.SQLHDBC(c.hdbc), C.SQL_ATTR_TXN_ISOLATION,
-		C.SQLPOINTER(a), C.SQL_NTS)
+	ret := sqlSetConnectUIntPtrAttr(C.SQLHDBC(c.hdbc), C.SQL_ATTR_TXN_ISOLATION,
+		a, C.SQL_NTS)
 	if !success(ret) {
 		return formatError(C.SQL_HANDLE_STMT, c.hdbc)
 	}
